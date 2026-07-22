@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Repositório Cantai — Igreja de Cristo BH</title>
+  <meta name="description" content="Repositório de louvores da Igreja de Cristo BH. Consulte, filtre e registre quando cada cântico foi utilizado pela última vez." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- HERO SECTION -->
+  <header class="hero">
+    <img src="src/imagens/hero.jpeg" alt="Louvor ao Senhor - Igreja de Cristo" class="hero__image" />
+    <div class="hero__overlay"></div>
+    <div class="hero__content">
+      <span class="hero__badge">Igreja de Cristo BH</span>
+      <h1 class="hero__title">Repositório Cantai</h1>
+      <p class="hero__subtitle">Ministério de Louvor</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- TABS -->
+    <nav class="tabs" role="tablist">
+      <button class="tab tab--active" data-tab="repositorio" role="tab">Repositório</button>
+      <button class="tab" data-tab="atualizar" role="tab">Atualizar Data</button>
+    </nav>
+
+    <!-- ABA 1: REPOSITÓRIO -->
+    <section class="panel panel--active" id="panel-repositorio">
+      <div class="card">
+        <div class="card__header">
+          <h2>Filtros</h2>
+          <p>Busque e refine a lista de louvores.</p>
+        </div>
+        <div class="filtros">
+          <div class="campo">
+            <label for="filtro-busca">Buscar por nome</label>
+            <input type="text" id="filtro-busca" placeholder="Ex: Alegria..." />
+          </div>
+          <div class="campo">
+            <label for="filtro-acorde">Acorde</label>
+            <select id="filtro-acorde">
+              <option value="">Todos</option>
+            </select>
+          </div>
+          <div class="campo">
+            <label for="filtro-nota">Primeira nota</label>
+            <select id="filtro-nota">
+              <option value="">Todas</option>
+            </select>
+          </div>
+          <button class="btn btn--ghost" id="btn-limpar">Limpar filtros</button>
+        </div>
+      </div>
+
+      <div class="card card--table">
+        <div class="card__header card__header--row">
+          <div>
+            <h2>Louvores</h2>
+            <p id="contagem">0 louvores</p>
+          </div>
+        </div>
+        <div class="tabela-wrapper">
+          <table class="tabela">
+            <thead>
+              <tr>
+                <th data-sort="Id">#</th>
+                <th data-sort="Nome">Nome</th>
+                <th data-sort="PrimeiraNota">1ª Nota</th>
+                <th data-sort="Acorde">Acorde</th>
+                <th data-sort="UltimaUtilizacao">Última utilização</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-louvores"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ABA 2: ATUALIZAR -->
+    <section class="panel" id="panel-atualizar">
+      <div class="card">
+        <div class="card__header">
+          <h2>Atualizar última utilização</h2>
+          <p>Selecione o louvor cantado e informe a data.</p>
+        </div>
+
+        <div class="form">
+          <div class="campo">
+            <label for="select-louvor">Louvor</label>
+            <select id="select-louvor">
+              <option value="">Selecione um louvor...</option>
+            </select>
+          </div>
+
+          <div class="campo">
+            <label>Data da última utilização</label>
+            <div class="datepicker" id="datepicker">
+              <button class="datepicker__toggle" id="dp-toggle" type="button">
+                <span id="dp-label">Selecione uma data</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </button>
+              <div class="datepicker__popover" id="dp-popover" hidden>
+                <div class="dp__header">
+                  <button type="button" class="dp__nav" id="dp-prev" aria-label="Mês anterior">‹</button>
+                  <span id="dp-title"></span>
+                  <button type="button" class="dp__nav" id="dp-next" aria-label="Próximo mês">›</button>
+                </div>
+                <div class="dp__weekdays">
+                  <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
+                </div>
+                <div class="dp__grid" id="dp-grid"></div>
+                <div class="dp__footer">
+                  <button type="button" class="btn btn--ghost btn--sm" id="dp-hoje">Hoje</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="preview" id="preview" hidden>
+            <div class="preview__row"><span>Louvor</span><strong id="preview-nome">—</strong></div>
+            <div class="preview__row"><span>Data atual no banco</span><strong id="preview-atual">—</strong></div>
+            <div class="preview__row"><span>Nova data</span><strong id="preview-nova">—</strong></div>
+          </div>
+
+          <button class="btn btn--primary" id="btn-salvar" disabled>Salvar alteração</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="rodape">
+    <p>Igreja de Cristo BH — Ministério de Louvor</p>
+  </footer>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -189,7 +189,12 @@ input[type="text"]:focus, select:focus {
    ======================================== */
 .card--table { padding: 1.5rem 0 0.5rem; }
 .card--table .card__header { padding: 0 1.5rem; }
-.tabela-wrapper { overflow-x: auto; margin-top: 0.5rem; }
+.tabela-wrapper { 
+  max-height: 520px; /* Altura limite (aproximadamente 15 linhas) */
+  overflow-y: auto;  /* Scroll vertical interno */
+  overflow-x: auto;  /* Scroll horizontal caso a tela seja menor */
+  margin-top: 0.5rem; 
+}
 .tabela {
   width: 100%;
   border-collapse: collapse;
@@ -207,6 +212,9 @@ input[type="text"]:focus, select:focus {
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 .tabela thead th:first-child { padding-left: 1.5rem; }
 .tabela thead th:last-child { padding-right: 1.5rem; }

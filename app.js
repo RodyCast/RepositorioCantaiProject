@@ -21,20 +21,20 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 function formatarData(iso) {
-  if (!iso || iso === '2026-01-01') return "Nunca cantado";
+  if (!iso) return "Nunca cantado";
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
 }
 
 function diasDesde(iso) {
-  if (!iso || iso === '2026-01-01') return null;
+  if (!iso) return 99999;
   const hoje = new Date();
   const data = new Date(iso + "T00:00:00");
   return Math.floor((hoje - data) / (1000 * 60 * 60 * 24));
 }
 
 function statusPorDias(dias) {
-  if (dias === null) return { classe: "status--nunca", texto: "Nunca cantado" };
+  if (dias === 99999) return { classe: "status--nunca", texto: "Nunca cantado" };
   if (dias <= 30)   return { classe: "status--recente", texto: `Há ${dias} dias` };
   if (dias <= 90)   return { classe: "status--medio",  texto: `Há ${dias} dias` };
   return { classe: "status--antigo", texto: `Há ${dias} dias` };
@@ -103,11 +103,24 @@ function renderTabela() {
     return true;
   });
 
-  lista.sort((a, b) => {
-    const va = a[ordenacao.campo] ?? "";
-    const vb = b[ordenacao.campo] ?? "";
+lista.sort((a, b) => {
+    let va = a[ordenacao.campo];
+    let vb = b[ordenacao.campo];
+
+    if (ordenacao.campo === "ultima_atualizacao") {
+      // Converte para timestamp numérico. Se não tiver data, joga para 0
+      va = va ? new Date(va + "T00:00:00").getTime() : 0;
+      vb = vb ? new Date(vb + "T00:00:00").getTime() : 0;
+    } else if (typeof va === "string") {
+      va = va.toLowerCase();
+      vb = vb.toLowerCase();
+    }
+
+    va = va ?? "";
+    vb = vb ?? "";
+
     if (va < vb) return ordenacao.asc ? -1 : 1;
-    if (va > vb) return ordenacao.asc ?  1 : -1;
+    if (va > vb) return ordenacao.asc ? 1 : -1;
     return 0;
   });
 
@@ -116,10 +129,9 @@ function renderTabela() {
     tbody.innerHTML = `<tr><td colspan="10" class="vazio">Nenhum louvor encontrado com esses filtros.</td></tr>`;
   } else {
     tbody.innerHTML = lista.map((l) => {
-      const dias = diasDesde(l.ultima_atualizacao);
+      const dias = diasDesde(l.ultima_utilizacao);
       const st = statusPorDias(dias);
       
-      // Formatação amigável para os booleanos (Sobe/Desce meio tom)
       const sobeTom = l.sobe_meio_tom ? "Sim" : "Não";
       const desceTom = l.desce_meio_tom ? "Sim" : "Não";
 
@@ -133,7 +145,7 @@ function renderTabela() {
           <td>${l.compasso}</td>
           <td>${sobeTom}</td>
           <td>${desceTom}</td>
-          <td>${formatarData(l.ultima_atualizacao)}</td>
+          <td>${formatarData(l.ultima_utilizacao)}</td>
           <td class="status ${st.classe}">${st.texto}</td>
         </tr>`;
     }).join("");
@@ -175,7 +187,7 @@ function atualizarPreview() {
   if (!louvorSelecionado) { preview.hidden = true; $("#btn-salvar").disabled = true; return; }
   preview.hidden = false;
   $("#preview-nome").textContent  = louvorSelecionado.nome;
-  $("#preview-atual").textContent = formatarData(louvorSelecionado.ultima_atualizacao);
+  $("#preview-atual").textContent = formatarData(louvorSelecionado.ultima_utilizacao);
   $("#preview-nova").textContent  = dataSelecionada ? formatarData(dataSelecionada) : "—";
   $("#btn-salvar").disabled = !dataSelecionada;
 }
@@ -239,7 +251,7 @@ $("#btn-salvar").addEventListener("click", async () => {
   if (!louvorSelecionado || !dataSelecionada) return;
   try {
     await salvarNoBanco(louvorSelecionado.id, dataSelecionada);
-    louvorSelecionado.ultima_atualizacao = dataSelecionada;
+    louvorSelecionado.ultima_utilizacao = dataSelecionada;
     mostrarToast(`"${louvorSelecionado.nome}" atualizado com sucesso!`);
     renderTabela();
     atualizarPreview();
@@ -250,9 +262,10 @@ $("#btn-salvar").addEventListener("click", async () => {
 });
 
 async function salvarNoBanco(id, dataISO) {
+
   const { error } = await db // <-- trocado de supabase para db
     .from('musicas')
-    .update({ ultima_atualizacao: dataISO })
+    .update({ ultima_utilizacao: dataISO })
     .eq('id', id);
 
   if (error) {

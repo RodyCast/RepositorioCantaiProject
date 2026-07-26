@@ -390,6 +390,8 @@ function renderFluxo() {
 
   tbody.innerHTML = html + datalistHtml;
 
+  renderizarGraficoFluxo();
+
   // Evento para validar e salvar quando o usuário seleciona ou digita o nome
   document.querySelectorAll(".input-fluxo-musica").forEach(input => {
     const idx = input.dataset.index;
@@ -400,6 +402,7 @@ function renderFluxo() {
       if (!valorDigitado) {
         fluxoCulto[idx].musicaId = null;
         salvarFluxoLocal();
+        renderizarGraficoFluxo();
         return;
       }
 
@@ -413,9 +416,11 @@ function renderFluxo() {
       if (encontrada) {
         fluxoCulto[idx].musicaId = encontrada.id;
         salvarFluxoLocal();
+        renderizarGraficoFluxo();
       } else {
         // Se ainda está digitando e não achou correspondência exata, limpa temporariamente o ID
         fluxoCulto[idx].musicaId = null;
+        renderizarGraficoFluxo();
       }
     });
 
@@ -425,6 +430,7 @@ function renderFluxo() {
       if (!valorDigitado) {
         fluxoCulto[idx].musicaId = null;
         salvarFluxoLocal();
+        renderizarGraficoFluxo();
         return;
       }
 
@@ -442,6 +448,7 @@ function renderFluxo() {
         mostrarToast("Música não encontrada. Selecione uma da lista.");
       }
       salvarFluxoLocal();
+      renderizarGraficoFluxo();
     });
   });
 
@@ -452,6 +459,7 @@ function renderFluxo() {
       fluxoCulto.splice(idx + 1, 0, { tipo: 'musica', musicaId: null, extra: true });
       salvarFluxoLocal();
       renderFluxo();
+      renderizarGraficoFluxo();
     });
   });
 
@@ -462,8 +470,108 @@ function renderFluxo() {
       fluxoCulto.splice(idx, 1);
       salvarFluxoLocal();
       renderFluxo();
+      renderizarGraficoFluxo();
     });
   });
+}
+
+// Função auxiliar para extrair o número do fluxo (ex: "Contemplação 05" vira 5)
+function extrairNumeroFluxo(fluxoTexto) {
+  if (!fluxoTexto) return null;
+  const match = fluxoTexto.match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function renderizarGraficoFluxo() {
+  const gElementos = $("#grafico-elementos");
+  const divLegenda = $("#grafico-legenda");
+  if (!gElementos) return;
+
+  // Filtra apenas os itens que são músicas e que têm uma música selecionada
+  const musicasNoFluxo = fluxoCulto
+    .filter(item => item.tipo === 'musica')
+    .map(item => {
+      if (!item.musicaId) return { valor: null, nome: "Espaço vazio" };
+      const m = louvores.find(l => l.id === item.musicaId);
+      const valorFluxo = m ? extrairNumeroFluxo(m.fluxo_culto) : null;
+      return {
+        valor: valorFluxo,
+        nome: m ? m.nome : "Desconhecida"
+      };
+    });
+
+  const total = musicasNoFluxo.length;
+  if (total === 0) {
+    gElementos.innerHTML = `<text x="300" y="75" text-anchor="middle" fill="#94a3b8" font-size="14">Preencha o fluxo para ver a curva do culto</text>`;
+    divLegenda.innerHTML = "<p>Nenhuma música selecionada no momento.</p>";
+    return;
+  }
+
+  // Dimensões da viewBox do SVG: Largura 600, Altura 150
+  const larguraSvg = 600;
+  const alturaSvg = 150;
+  const paddingX = 40;
+  const larguraUtil = larguraSvg - (paddingX * 2);
+
+  let pontosCoordenadas = [];
+  musicasNoFluxo.forEach((item, index) => {
+    // Calcula a posição X proporcional ao número de músicas
+    const x = total === 1 ? larguraSvg / 2 : paddingX + (index / (total - 1)) * larguraUtil;
+    
+    // Calcula a posição Y (Escala de 1 a 10: 10 fica em cima, 1 fica embaixo)
+    // Invertemos o eixo Y do SVG (0 é em cima, 150 é embaixo)
+    let y = alturaSvg / 2; // Padrão no meio se não tiver valor
+    if (item.valor !== null) {
+      // Mapeia 1 a 10 para a altura do SVG (deixando margens de 15px em cima e embaixo)
+      const minY = 20;
+      const maxY = alturaSvg - 20;
+      y = maxY - ((item.valor - 1) / 9) * (maxY - minY);
+    }
+
+    pontosCoordenadas.push({ x, y, ...item });
+  });
+
+  // Monta o caminho da linha (path d="M x y L x y ...")
+  let pathD = "";
+  let circulosHtml = "";
+
+  pontosCoordenadas.forEach((p, i) => {
+    if (p.valor !== null) {
+      if (!pathD) {
+        pathD = `M ${p.x} ${p.y}`;
+      } else {
+        pathD += ` L ${p.x} ${p.y}`;
+      }
+      circulosHtml += `<circle cx="${p.x}" cy="${p.y}" r="6" class="ponto-grafico" data-nome="${p.nome}" data-valor="${p.valor}"><title>${p.nome} (Fluxo: ${p.valor})</title></circle>`;
+    }
+  });
+
+  let svgContent = "";
+  if (pathD) {
+    // Desenha a linha de tendência conectando os pontos válidos
+    svgContent += `<path d="${pathD}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />`;
+  }
+  svgContent += circulosHtml;
+
+  gElementos.innerHTML = svgContent;
+
+  // Análise simples para dar feedback ao usuário sobre o formato de sorriso
+  const valoresValidos = musicasNoFluxo.filter(m => m.valor !== null).map(m => m.valor);
+  let analiseTexto = "Continue preenchendo o fluxo para avaliar o formato.";
+  
+  if (valoresValidos.length >= 3) {
+    const inicio = valoresValidos[0];
+    const meio = valoresValidos[Math.floor(valoresValidos.length / 2)];
+    const fim = valoresValidos[valoresValidos.length - 1];
+
+    if (inicio >= 6 && meio <= 5 && fim >= 6) {
+      analiseTexto = "✨ **Perfeito!** O formato está em 'sorriso' (Início festivo, momento contemplativo no meio e encerramento festivo).";
+    } else {
+      analiseTexto = "💡 **Dica:** Tente colocar músicas mais contemplativas (1-5) no meio do culto e celebrações (6-10) no início e no fim.";
+    }
+  }
+
+  divLegenda.innerHTML = `<p>${analiseTexto}</p>`;
 }
 
 // Botão limpar fluxo completo (volta ao padrão)
@@ -472,6 +580,7 @@ $("#btn-limpar-fluxo").addEventListener("click", () => {
     fluxoCulto = JSON.parse(JSON.stringify(ESTRUTURA_PADRAO_FLUXO));
     salvarFluxoLocal();
     renderFluxo();
+    renderizarGraficoFluxo();
     mostrarToast("Fluxo redefinido para o padrão.");
   }
 });

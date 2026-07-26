@@ -167,6 +167,35 @@
               <!-- Gerado dinamicamente pelo JavaScript -->
             </tbody>
           </table>
+          <!-- GRÁFICO DINÂMICO DO FLUXO DO CULTO -->
+          <div class="card card-grafico-fluxo" style="margin-top: 20px;">
+            <div class="card__header">
+              <h2>Dinâmica do Culto (Curva de Fluxo)</h2>
+              <p>Visualize o ritmo do culto. O ideal é o formato de "sorriso" (Ritmo: 1 a 5 = Contemplação | 6 a 10 = Celebração).</p>
+            </div>
+            
+            <div class="grafico-container">
+              <div class="grafico-eixos-y">
+                <span>10 (Celebração)</span>
+                <span>5</span>
+                <span>1 (Contemplação)</span>
+              </div>
+              <div class="grafico-area">
+                <!-- SVG gerado dinamicamente via JS -->
+                <svg id="svg-grafico" viewBox="0 0 600 150" preserveAspectRatio="none">
+                  <!-- Linhas de referência de fundo -->
+                  <line x1="0" y1="37.5" x2="600" y2="37.5" stroke="#e2e8f0" stroke-dasharray="4" />
+                  <line x1="0" y1="75" x2="600" y2="75" stroke="#cbd5e1" stroke-dasharray="4" />
+                  <line x1="0" y1="112.5" x2="600" y2="112.5" stroke="#e2e8f0" stroke-dasharray="4" />
+                  <!-- O caminho da curva e os pontos serão injetados aqui -->
+                  <g id="grafico-elementos"></g>
+                </svg>
+              </div>
+            </div>
+            <div class="grafico-legenda" id="grafico-legenda">
+              <!-- Resumo textual do formato -->
+            </div>
+          </div>
         </div>
       </div>
     </section>

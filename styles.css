@@ -110,6 +110,19 @@ h1, h2, h3 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; letter-s
 .panel--active { display: block; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
+.tr-titulo {
+  background-color: var(--color-surface-hover, #f1f5f9);
+}
+.tr-titulo td {
+  font-weight: 700;
+  color: var(--color-primary, #0f172a);
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  padding: 12px 16px !important;
+  border-top: 2px solid var(--color-border, #e2e8f0);
+}
+
 /* ========================================
    CARDS
    ======================================== */
@@ -160,6 +173,16 @@ input[type="text"]:focus, select:focus {
   box-shadow: 0 0 0 3px rgba(125, 155, 118, 0.15);
 }
 
+.input-fluxo-musica {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  background: var(--color-bg, #fff);
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
 /* ========================================
    BOTÕES
    ======================================== */
@@ -183,6 +206,13 @@ input[type="text"]:focus, select:focus {
   border-color: var(--borda);
 }
 .btn--ghost:hover { background: var(--creme); color: var(--texto); }
+.btn-remover-extra {
+  color: #ef4444;
+  border-color: #f87171;
+}
+.btn-remover-extra:hover {
+  background-color: #fee2e2;
+}
 
 /* ========================================
    TABELA
@@ -353,6 +383,12 @@ input[type="text"]:focus, select:focus {
 .dp__day:disabled { color: var(--borda); cursor: not-allowed; }
 .dp__footer { margin-top: 0.75rem; display: flex; justify-content: center; }
 
+.acoes-fluxo {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
 /* ========================================
    TOAST
    ======================================== */
@@ -377,4 +413,16 @@ input[type="text"]:focus, select:focus {
   font-size: 0.85rem;
   border-top: 1px solid var(--borda);
   background: var(--creme-claro);
+}
+
+/* ====================================
+SELECTS
+=============================== */
+
+.select-fluxo-musica {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  background: var(--color-bg, #fff);
 }

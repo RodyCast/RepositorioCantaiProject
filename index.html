@@ -31,6 +31,7 @@
     <nav class="tabs" role="tablist">
       <button class="tab tab--active" data-tab="repositorio" role="tab">Repositório</button>
       <button class="tab" data-tab="atualizar" role="tab">Atualizar Data</button>
+      <button class="tab" data-tab="fluxo" role="tab">Fluxo do Culto</button>
     </nav>
 
     <!-- ABA 1: REPOSITÓRIO -->
@@ -137,6 +138,35 @@
           </div>
 
           <button class="btn btn--primary" id="btn-salvar" disabled>Salvar alteração</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ABA 3: FLUXO DO CULTO -->
+    <section class="panel" id="panel-fluxo">
+      <div class="card">
+        <div class="card__header card__header--row">
+          <div>
+            <h2>Montar Fluxo do Culto</h2>
+            <p>Organize a ordem dos louvores para o culto de domingo.</p>
+          </div>
+          <button class="btn btn--ghost btn--sm" id="btn-limpar-fluxo">Limpar Fluxo</button>
+        </div>
+        
+        <div class="fluxo-container">
+          <table class="tabela tabela-fluxo">
+            <thead>
+              <tr>
+                <th style="width: 80px;">Ordem</th>
+                <th>Momento / Título Fixo</th>
+                <th>Louvor Escolhido</th>
+                <th style="width: 100px;">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-fluxo">
+              <!-- Gerado dinamicamente pelo JavaScript -->
+            </tbody>
+          </table>
         </div>
       </div>
     </section>

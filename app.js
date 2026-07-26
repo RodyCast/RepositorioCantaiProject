@@ -288,10 +288,192 @@ async function iniciarAplicacao() {
     popularSelectsDeFiltro();
     popularSelectLouvores();
     renderTabela();
+    inicializarFluxo();
   } catch (err) {
     console.error("Erro ao carregar dados do Supabase:", err);
     mostrarToast("Erro ao carregar músicas do banco.");
   }
 }
+
+// ---------- 12. ABA FLUXO DO CULTO ----------
+
+// Estrutura padrão baseada na sua regra de negócio
+// tipo: 'musica' (permite selecionar música e adicionar extras) ou 'titulo' (título fixo do culto)
+const ESTRUTURA_PADRAO_FLUXO = [
+  { tipo: 'musica', grupo: 'inicial' },
+  { tipo: 'titulo', texto: 'Abertura' },
+  { tipo: 'musica', grupo: 'abertura_1' },
+  { tipo: 'musica', grupo: 'abertura_2' },
+  { tipo: 'musica', grupo: 'abertura_3' },
+  { tipo: 'musica', grupo: 'abertura_4' },
+  { tipo: 'titulo', texto: 'Ceia' },
+  { tipo: 'musica', grupo: 'ceia' },
+  { tipo: 'titulo', texto: 'Oferta' },
+  { tipo: 'musica', grupo: 'oferta' },
+  { tipo: 'titulo', texto: 'Visitantes' },
+  { tipo: 'musica', grupo: 'visitantes' },
+  { tipo: 'titulo', texto: 'Leitura/Mensagem' },
+  { tipo: 'musica', grupo: 'mensagem_1' },
+  { tipo: 'musica', grupo: 'mensagem_2' },
+  { tipo: 'musica', grupo: 'mensagem_3' },
+  { tipo: 'musica', grupo: 'mensagem_4' },
+  { tipo: 'musica', grupo: 'mensagem_5' }
+];
+
+let fluxoCulto = [];
+
+function inicializarFluxo() {
+  // Carrega do localStorage se já houver algo salvo, senão usa o padrão
+  const salvo = localStorage.getItem('cantai_fluxo_culto');
+  if (salvo) {
+    try {
+      fluxoCulto = JSON.parse(salvo);
+    } catch (e) {
+      fluxoCulto = JSON.parse(JSON.stringify(ESTRUTURA_PADRAO_FLUXO));
+    }
+  } else {
+    fluxoCulto = JSON.parse(JSON.stringify(ESTRUTURA_PADRAO_FLUXO));
+  }
+  renderFluxo();
+}
+
+function salvarFluxoLocal() {
+  localStorage.setItem('cantai_fluxo_culto', JSON.stringify(fluxoCulto));
+}
+
+function renderFluxo() {
+  const tbody = $("#tbody-fluxo");
+  let html = "";
+  let contadorMusica = 1;
+
+  // Cria a lista de opções para o datalist apenas com o nome (e acorde opcional)
+  const datalistOpcoes = [...louvores]
+    .sort((a, b) => a.nome.localeCompare(b.nome))
+    .map(l => `<option value="${l.nome}${l.acorde ? ` (${l.acorde})` : ''}"></option>`)
+    .join("");
+
+  let datalistHtml = `<datalist id="lista-louvores-fluxo">${datalistOpcoes}</datalist>`;
+
+  fluxoCulto.forEach((item, index) => {
+    if (item.tipo === 'titulo') {
+      html += `
+        <tr class="tr-titulo">
+          <td colspan="4"><strong>${item.texto}</strong></td>
+        </tr>
+      `;
+    } else {
+      // Busca o nome formatado da música selecionada para exibir no input
+      let textoInput = "";
+      if (item.musicaId) {
+        const m = louvores.find(l => l.id === item.musicaId);
+        if (m) textoInput = `${m.nome}${m.acorde ? ` (${m.acorde})` : ''}`;
+      }
+
+      html += `
+        <tr data-index="${index}">
+          <td class="td-ordem">#${contadorMusica}</td>
+          <td><span class="badge-slot">Espaço para música</span></td>
+          <td>
+            <input type="text" class="input-fluxo-musica" data-index="${index}" list="lista-louvores-fluxo" value="${textoInput}" placeholder="Digite o nome do louvor..." autocomplete="off">
+          </td>
+          <td>
+            <div class="acoes-fluxo">
+              <button type="button" class="btn btn--ghost btn--sm btn-add-mais" data-index="${index}" title="Adicionar música logo abaixo">+</button>
+              ${item.extra ? `<button type="button" class="btn btn--ghost btn--sm btn-remover-extra" data-index="${index}" title="Remover esta linha">×</button>` : ''}
+            </div>
+          </td>
+        </tr>
+      `;
+      contadorMusica++;
+    }
+  });
+
+  tbody.innerHTML = html + datalistHtml;
+
+  // Evento para validar e salvar quando o usuário seleciona ou digita o nome
+  document.querySelectorAll(".input-fluxo-musica").forEach(input => {
+    const idx = input.dataset.index;
+
+    input.addEventListener("input", (e) => {
+      const valorDigitado = e.target.value.trim();
+      
+      if (!valorDigitado) {
+        fluxoCulto[idx].musicaId = null;
+        salvarFluxoLocal();
+        return;
+      }
+
+      // Tenta encontrar a música correspondente pelo nome exato (ignorando maiúsculas/minúsculas)
+      // O valor do input vem no formato "Nome (Acorde)" ou apenas "Nome"
+      const encontrada = louvores.find(l => {
+        const nomeFormatado = `${l.nome}${l.acorde ? ` (${l.acorde})` : ''}`;
+        return nomeFormatado.toLowerCase() === valorDigitado.toLowerCase() || l.nome.toLowerCase() === valorDigitado.toLowerCase();
+      });
+
+      if (encontrada) {
+        fluxoCulto[idx].musicaId = encontrada.id;
+        salvarFluxoLocal();
+      } else {
+        // Se ainda está digitando e não achou correspondência exata, limpa temporariamente o ID
+        fluxoCulto[idx].musicaId = null;
+      }
+    });
+
+    // Ao sair do campo (blur), garante que se o usuário digitou algo inválido que não existe na lista, o campo é limpo
+    input.addEventListener("change", (e) => {
+      const valorDigitado = e.target.value.trim();
+      if (!valorDigitado) {
+        fluxoCulto[idx].musicaId = null;
+        salvarFluxoLocal();
+        return;
+      }
+
+      const encontrada = louvores.find(l => {
+        const nomeFormatado = `${l.nome}${l.acorde ? ` (${l.acorde})` : ''}`;
+        return nomeFormatado.toLowerCase() === valorDigitado.toLowerCase() || l.nome.toLowerCase() === valorDigitado.toLowerCase();
+      });
+
+      if (encontrada) {
+        fluxoCulto[idx].musicaId = encontrada.id;
+        input.value = `${encontrada.nome}${encontrada.acorde ? ` (${encontrada.acorde})` : ''}`;
+      } else {
+        fluxoCulto[idx].musicaId = null;
+        input.value = "";
+        mostrarToast("Música não encontrada. Selecione uma da lista.");
+      }
+      salvarFluxoLocal();
+    });
+  });
+
+  // Evento para adicionar música extra logo abaixo
+  document.querySelectorAll(".btn-add-mais").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      const idx = Number(e.target.dataset.index);
+      fluxoCulto.splice(idx + 1, 0, { tipo: 'musica', musicaId: null, extra: true });
+      salvarFluxoLocal();
+      renderFluxo();
+    });
+  });
+
+  // Evento para remover música extra criada
+  document.querySelectorAll(".btn-remover-extra").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      const idx = Number(e.target.dataset.index);
+      fluxoCulto.splice(idx, 1);
+      salvarFluxoLocal();
+      renderFluxo();
+    });
+  });
+}
+
+// Botão limpar fluxo completo (volta ao padrão)
+$("#btn-limpar-fluxo").addEventListener("click", () => {
+  if (confirm("Deseja realmente redefinir o fluxo do culto para o padrão?")) {
+    fluxoCulto = JSON.parse(JSON.stringify(ESTRUTURA_PADRAO_FLUXO));
+    salvarFluxoLocal();
+    renderFluxo();
+    mostrarToast("Fluxo redefinido para o padrão.");
+  }
+});
 
 document.addEventListener("DOMContentLoaded", iniciarAplicacao);

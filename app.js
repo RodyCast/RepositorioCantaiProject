@@ -13,7 +13,7 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let louvores = [];
 
 // ---------- 2. ESTADO DA UI ----------
-let filtros = { busca: "", acorde: "", nota: "" };
+let filtros = { busca: "", acorde: "", fluxo: "", status: "" };
 let ordenacao = { campo: "nome", asc: true };
 
 // ---------- 3. HELPERS ----------
@@ -61,26 +61,52 @@ $$(".tab").forEach((btn) => {
 // ---------- 5. FILTROS (aba Repositório) ----------
 function popularSelectsDeFiltro() {
   const acordes = [...new Set(louvores.map((l) => l.acorde))].sort();
-  const notas   = [...new Set(louvores.map((l) => l.primeiras_notas))].sort();
+  // Extrai fluxos únicos e ordena numericamente se possível
+  const fluxos = [...new Set(louvores.map((l) => l.fluxo_culto))].filter(Boolean).sort((a, b) => {
+    const numA = extrairNumeroFluxo(a) || 0;
+    const numB = extrairNumeroFluxo(b) || 0;
+    return numA - numB;
+  });
+
   const selA = $("#filtro-acorde");
-  const selN = $("#filtro-nota");
+  const selF = $("#filtro-fluxo");
+  const selS = $("#filtro-status");
   
-  // Limpa opções antigas se houver
+  // Limpa opções antigas
   selA.innerHTML = '<option value="">Todos os acordes</option>';
-  selN.innerHTML = '<option value="">Todas as notas</option>';
+  if (selF) selF.innerHTML = '<option value="">Todos os fluxos</option>';
+  if (selS) selS.innerHTML = '<option value="">Todos os status</option>';
 
   acordes.forEach((a) => selA.insertAdjacentHTML("beforeend", `<option value="${a}">${a}</option>`));
-  notas.forEach((n)   => selN.insertAdjacentHTML("beforeend", `<option value="${n}">${n}</option>`));
+  
+  if (selF) {
+    fluxos.forEach((f) => selF.insertAdjacentHTML("beforeend", `<option value="${f}">${f}</option>`));
+  }
+
+  // Opções padrão de status baseadas na sua regra de dias
+  if (selS) {
+    selS.insertAdjacentHTML("beforeend", `
+      <option value="nunca">Nunca cantado</option>
+      <option value="recente">Há menos de 30 dias</option>
+      <option value="medio">Entre 30 e 90 dias</option>
+      <option value="antigo">Há mais de 90 dias</option>
+    `);
+  }
 }
 
 $("#filtro-busca").addEventListener("input", (e) => { filtros.busca = e.target.value.toLowerCase(); renderTabela(); });
 $("#filtro-acorde").addEventListener("change", (e) => { filtros.acorde = e.target.value; renderTabela(); });
-$("#filtro-nota").addEventListener("change",   (e) => { filtros.nota   = e.target.value; renderTabela(); });
+
+// Novos filtros de fluxo e status (substituem o filtro de nota)
+$("#filtro-fluxo").addEventListener("change", (e) => { filtros.fluxo = e.target.value; renderTabela(); });
+$("#filtro-status").addEventListener("change", (e) => { filtros.status = e.target.value; renderTabela(); });
+
 $("#btn-limpar").addEventListener("click", () => {
-  filtros = { busca: "", acorde: "", nota: "" };
+  filtros = { busca: "", acorde: "", fluxo: "", status: "" };
   $("#filtro-busca").value = "";
   $("#filtro-acorde").value = "";
-  $("#filtro-nota").value = "";
+  if ($("#filtro-fluxo")) $("#filtro-fluxo").value = "";
+  if ($("#filtro-status")) $("#filtro-status").value = "";
   renderTabela();
 });
 
@@ -99,7 +125,22 @@ function renderTabela() {
   let lista = louvores.filter((l) => {
     if (filtros.busca && !l.nome.toLowerCase().includes(filtros.busca)) return false;
     if (filtros.acorde && l.acorde !== filtros.acorde) return false;
-    if (filtros.nota && l.primeiras_notas !== filtros.nota) return false;
+    
+    // Filtro por fluxo
+    if (filtros.fluxo && l.fluxo_culto !== filtros.fluxo) return false;
+
+    // Filtro por status (baseado nos dias desde a última utilização)
+    if (filtros.status) {
+      const dias = diasDesde(l.ultima_utilizacao);
+      const st = statusPorDias(dias);
+      
+      // Mapeia a classe ou condição para o valor selecionado
+      if (filtros.status === "nunca" && dias !== 99999) return false;
+      if (filtros.status === "recente" && dias > 30) return false;
+      if (filtros.status === "medio" && (dias <= 30 || dias > 90)) return false;
+      if (filtros.status === "antigo" && (dias <= 90 || dias === 99999)) return false;
+    }
+
     return true;
   });
 
@@ -297,7 +338,7 @@ async function iniciarAplicacao() {
 
 // ---------- 12. ABA FLUXO DO CULTO ----------
 
-// Estrutura padrão baseada na sua regra de negócio
+// Estrutura padrão do culto no Centro
 // tipo: 'musica' (permite selecionar música e adicionar extras) ou 'titulo' (título fixo do culto)
 const ESTRUTURA_PADRAO_FLUXO = [
   { tipo: 'musica', grupo: 'inicial' },

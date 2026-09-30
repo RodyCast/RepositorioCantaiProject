@@ -15,6 +15,7 @@ let louvores = [];
 // ---------- 2. ESTADO DA UI ----------
 let filtros = { busca: "", acorde: "", fluxo: "", status: "" };
 let ordenacao = { campo: "nome", asc: true };
+let grupoId = null; // grupo de quem está logado (null = visitante)
 
 // ---------- 3. HELPERS ----------
 const $ = (sel) => document.querySelector(sel);
@@ -145,25 +146,24 @@ function renderTabela() {
   });
 
 lista.sort((a, b) => {
-    let va = a[ordenacao.campo];
-    let vb = b[ordenacao.campo];
+  let va = a[ordenacao.campo];
+  let vb = b[ordenacao.campo];
 
-    if (ordenacao.campo === "ultima_atualizacao") {
-      // Converte para timestamp numérico. Se não tiver data, joga para 0
-      va = va ? new Date(va + "T00:00:00").getTime() : 0;
-      vb = vb ? new Date(vb + "T00:00:00").getTime() : 0;
-    } else if (typeof va === "string") {
-      va = va.toLowerCase();
-      vb = vb.toLowerCase();
-    }
+  if (ordenacao.campo === "ultima_utilizacao") {
+    va = va ? new Date(va + "T00:00:00").getTime() : 0;
+    vb = vb ? new Date(vb + "T00:00:00").getTime() : 0;
+  } else if (typeof va === "string" && typeof vb === "string") {
+    va = va.toLowerCase();
+    vb = vb.toLowerCase();
+  }
 
-    va = va ?? "";
-    vb = vb ?? "";
+  va = va ?? "";
+  vb = vb ?? "";
 
-    if (va < vb) return ordenacao.asc ? -1 : 1;
-    if (va > vb) return ordenacao.asc ? 1 : -1;
-    return 0;
-  });
+  if (va < vb) return ordenacao.asc ? -1 : 1;
+  if (va > vb) return ordenacao.asc ? 1 : -1;
+  return 0;
+});
 
   const tbody = $("#tbody-louvores");
   if (lista.length === 0) {
@@ -186,8 +186,8 @@ lista.sort((a, b) => {
           <td>${l.compasso}</td>
           <td>${sobeTom}</td>
           <td>${desceTom}</td>
-          <td>${formatarData(l.ultima_utilizacao)}</td>
-          <td class="status ${st.classe}">${st.texto}</td>
+          <td class="so-logado">${formatarData(l.ultima_utilizacao)}</td>
+          <td class="status so-logado ${st.classe}">${st.texto}</td>
         </tr>`;
     }).join("");
   }
@@ -302,39 +302,128 @@ $("#btn-salvar").addEventListener("click", async () => {
   }
 });
 
-async function salvarNoBanco(id, dataISO) {
-
-  const { error } = await db // <-- trocado de supabase para db
-    .from('musicas')
-    .update({ ultima_utilizacao: dataISO })
-    .eq('id', id);
+async function salvarNoBanco(musicaId, dataISO) {
+  const { data, error } = await db
+    .from('utilizacoes')
+    .upsert(
+      { musica_id: musicaId, grupo_id: grupoId, ultima_utilizacao: dataISO },
+      { onConflict: 'musica_id,grupo_id' }
+    )
+    .select();
 
   if (error) {
-    console.error("Erro ao atualizar no Supabase:", error);
+    console.error("Erro ao salvar no Supabase:", error);
     throw error;
+  }
+  if (!data || data.length === 0) {
+    throw new Error("Nenhuma linha gravada (sem permissão).");
   }
   return true;
 }
 
-// ---------- 11. INICIALIZAÇÃO ----------
+// ---------- 11. INICIALIZAÇÃO E LOGIN ----------
+
+// Busca as músicas e, se houver login, as datas do grupo da pessoa
+async function carregarDados() {
+  const { data: musicas, error } = await db.from('musicas').select('*');
+  if (error) throw error;
+
+  const datas = {};
+  grupoId = null;
+
+  const { data: { session } } = await db.auth.getSession();
+  if (session) {
+    const { data: perfil, error: e1 } = await db
+      .from('perfis')
+      .select('grupo_id')
+      .eq('user_id', session.user.id)
+      .maybeSingle();
+    if (e1) throw e1;
+
+    if (!perfil) {
+      await db.auth.signOut();
+      throw new Error("Usuário sem grupo vinculado.");
+    }
+    grupoId = perfil.grupo_id;
+
+    const { data: uts, error: e2 } = await db
+      .from('utilizacoes')
+      .select('musica_id, ultima_utilizacao')
+      .eq('grupo_id', grupoId);
+    if (e2) throw e2;
+
+    uts.forEach((u) => { datas[u.musica_id] = u.ultima_utilizacao; });
+  }
+
+  // Junta música + data do grupo (em C#, seria um Join).
+  // O "...m" copia todos os campos da música; depois sobrescrevemos a data.
+  louvores = musicas.map((m) => ({ ...m, ultima_utilizacao: datas[m.id] ?? null }));
+}
+
+// Recarrega dados e redesenha a tela conforme o estado de login
+async function recarregarTudo() {
+  await carregarDados();
+  const logado = grupoId !== null;
+
+  document.body.classList.toggle("logado", logado);
+  $("#login-box").hidden = logado;
+  $("#area-atualizar").hidden = !logado;
+
+  // zera filtros, ordenação por data e seleção da aba Atualizar
+  filtros = { busca: "", acorde: "", fluxo: "", status: "" };
+  $("#filtro-busca").value = "";
+  if (!logado && ordenacao.campo === "ultima_utilizacao") {
+    ordenacao = { campo: "nome", asc: true };
+  }
+  louvorSelecionado = null;
+  dataSelecionada = null;
+  $("#dp-label").textContent = "Selecione uma data";
+
+  popularSelectsDeFiltro();
+  popularSelectLouvores();
+  renderTabela();
+  atualizarPreview();
+  inicializarFluxo();
+}
+
 async function iniciarAplicacao() {
   try {
-    const { data, error } = await db // <-- trocado de supabase para db
-      .from('musicas')
-      .select('*');
-
-    if (error) throw error;
-
-    louvores = data || [];
-    popularSelectsDeFiltro();
-    popularSelectLouvores();
-    renderTabela();
-    inicializarFluxo();
+    await recarregarTudo();
   } catch (err) {
     console.error("Erro ao carregar dados do Supabase:", err);
     mostrarToast("Erro ao carregar músicas do banco.");
   }
 }
+
+async function fazerLogin() {
+  const email = $("#login-email").value.trim();
+  const password = $("#login-senha").value;
+
+  const { error } = await db.auth.signInWithPassword({ email, password });
+  if (error) {
+    mostrarToast("E-mail ou senha incorretos.");
+    return;
+  }
+  $("#login-senha").value = "";
+  try {
+    await recarregarTudo();
+    mostrarToast("Login realizado!");
+  } catch (err) {
+    console.error(err);
+    mostrarToast("Erro ao carregar os dados do seu grupo.");
+  }
+}
+
+$("#btn-login").addEventListener("click", fazerLogin);
+$("#login-senha").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") fazerLogin();
+});
+
+$("#btn-logout").addEventListener("click", async () => {
+  await db.auth.signOut();
+  await recarregarTudo();
+  mostrarToast("Você saiu.");
+});
 
 // ---------- 12. ABA FLUXO DO CULTO ----------
 

@@ -58,7 +58,7 @@
               <option value="">Todos os fluxos</option>
             </select>
           </div>
-          <div class="campo">
+          <div class="campo so-logado">
             <label for="filtro-status">Status</label>
             <select id="filtro-status">
               <option value="">Todos</option>
@@ -91,8 +91,8 @@
                 <th data-sort="compasso">Compasso</th>
                 <th data-sort="sobe_meio_tom">Sobe Tom</th>
                 <th data-sort="desce_meio_tom">Desce Tom</th>
-                <th data-sort="ultima_utilizacao">Última utilização</th>
-                <th data-sort="ultima_utilizacao">Status</th>
+                <th data-sort="ultima_utilizacao" class="so-logado">Última utilização</th>
+                <th data-sort="ultima_utilizacao" class="so-logado">Status</th>
               </tr>
             </thead>
             <tbody id="tbody-louvores"></tbody>
@@ -103,52 +103,75 @@
 
     <!-- ABA 2: ATUALIZAR -->
     <section class="panel" id="panel-atualizar">
-      <div class="card">
-        <div class="card__header">
-          <h2>Atualizar última utilização</h2>
-          <p>Selecione o louvor cantado e informe a data.</p>
-        </div>
 
+      <div class="card" id="login-box">
+        <div class="card__header">
+          <h2>Acesso restrito</h2>
+          <p>Entre para atualizar as datas dos louvores do seu grupo.</p>
+        </div>
         <div class="form">
           <div class="campo">
-            <label for="select-louvor">Louvor</label>
-            <select id="select-louvor">
-              <option value="">Selecione um louvor...</option>
-            </select>
+            <label for="login-email">E-mail</label>
+            <input type="email" id="login-email" autocomplete="username" />
           </div>
-
           <div class="campo">
-            <label>Data da última utilização</label>
-            <div class="datepicker" id="datepicker">
-              <button class="datepicker__toggle" id="dp-toggle" type="button">
-                <span id="dp-label">Selecione uma data</span>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
-              </button>
-              <div class="datepicker__popover" id="dp-popover" hidden>
-                <div class="dp__header">
-                  <button type="button" class="dp__nav" id="dp-prev" aria-label="Mês anterior">‹</button>
-                  <span id="dp-title"></span>
-                  <button type="button" class="dp__nav" id="dp-next" aria-label="Próximo mês">›</button>
-                </div>
-                <div class="dp__weekdays">
-                  <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
-                </div>
-                <div class="dp__grid" id="dp-grid"></div>
-                <div class="dp__footer">
-                  <button type="button" class="btn btn--ghost btn--sm" id="dp-hoje">Hoje</button>
+            <label for="login-senha">Senha</label>
+            <input type="password" id="login-senha" autocomplete="current-password" />
+          </div>
+          <button class="btn btn--primary" id="btn-login" type="button">Entrar</button>
+        </div>
+      </div>
+
+      <div id="area-atualizar" hidden>
+        <button class="btn btn--ghost btn--sm barra-sessao" id="btn-logout" type="button">Sair</button>
+
+        <div class="card">
+            <div class="card__header">
+              <h2>Atualizar última utilização</h2>
+              <p>Selecione o louvor cantado e informe a data.</p>
+            </div>
+
+            <div class="form">
+              <div class="campo">
+                <label for="select-louvor">Louvor</label>
+                <select id="select-louvor">
+                  <option value="">Selecione um louvor...</option>
+                </select>
+              </div>
+
+              <div class="campo">
+                <label>Data da última utilização</label>
+                <div class="datepicker" id="datepicker">
+                  <button class="datepicker__toggle" id="dp-toggle" type="button">
+                    <span id="dp-label">Selecione uma data</span>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                  </button>
+                  <div class="datepicker__popover" id="dp-popover" hidden>
+                    <div class="dp__header">
+                      <button type="button" class="dp__nav" id="dp-prev" aria-label="Mês anterior">‹</button>
+                      <span id="dp-title"></span>
+                      <button type="button" class="dp__nav" id="dp-next" aria-label="Próximo mês">›</button>
+                    </div>
+                    <div class="dp__weekdays">
+                      <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
+                    </div>
+                    <div class="dp__grid" id="dp-grid"></div>
+                    <div class="dp__footer">
+                      <button type="button" class="btn btn--ghost btn--sm" id="dp-hoje">Hoje</button>
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              <div class="preview" id="preview" hidden>
+                <div class="preview__row"><span>Louvor</span><strong id="preview-nome">—</strong></div>
+                <div class="preview__row"><span>Data atual no banco</span><strong id="preview-atual">—</strong></div>
+                <div class="preview__row"><span>Nova data</span><strong id="preview-nova">—</strong></div>
+              </div>
+
+              <button class="btn btn--primary" id="btn-salvar" disabled>Salvar alteração</button>
             </div>
           </div>
-
-          <div class="preview" id="preview" hidden>
-            <div class="preview__row"><span>Louvor</span><strong id="preview-nome">—</strong></div>
-            <div class="preview__row"><span>Data atual no banco</span><strong id="preview-atual">—</strong></div>
-            <div class="preview__row"><span>Nova data</span><strong id="preview-nova">—</strong></div>
-          </div>
-
-          <button class="btn btn--primary" id="btn-salvar" disabled>Salvar alteração</button>
-        </div>
       </div>
     </section>
 

@@ -366,8 +366,7 @@ async function recarregarTudo() {
   const logado = grupoId !== null;
 
   document.body.classList.toggle("logado", logado);
-  $("#login-box").hidden = logado;
-  $("#area-atualizar").hidden = !logado;
+  atualizarCaixas();
 
   // zera filtros, ordenação por data e seleção da aba Atualizar
   filtros = { busca: "", acorde: "", fluxo: "", status: "" };
@@ -423,6 +422,86 @@ $("#btn-logout").addEventListener("click", async () => {
   await db.auth.signOut();
   await recarregarTudo();
   mostrarToast("Você saiu.");
+});
+
+// ---------- 11.1 REDEFINIÇÃO DE SENHA ----------
+let pedindoLink = false;    // true = mostrando a caixa "Enviar link"
+let emRecuperacao = false;  // true = a pessoa chegou pelo link do e-mail
+
+// Decide qual caixa da aba "Atualizar Data" fica visível
+function atualizarCaixas() {
+  const logado = grupoId !== null;
+  $("#login-box").hidden      = logado || pedindoLink || emRecuperacao;
+  $("#recuperar-box").hidden  = logado || !pedindoLink || emRecuperacao;
+  $("#nova-senha-box").hidden = !emRecuperacao;
+  $("#area-atualizar").hidden = !logado || emRecuperacao;
+}
+
+$("#btn-esqueci").addEventListener("click", () => {
+  pedindoLink = true;
+  $("#recuperar-email").value = $("#login-email").value;
+  atualizarCaixas();
+});
+
+$("#btn-voltar-login").addEventListener("click", () => {
+  pedindoLink = false;
+  atualizarCaixas();
+});
+
+$("#btn-enviar-link").addEventListener("click", async () => {
+  const email = $("#recuperar-email").value.trim();
+  if (!email) { mostrarToast("Informe seu e-mail."); return; }
+
+  const btn = $("#btn-enviar-link");
+  btn.disabled = true;
+  const { error } = await db.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + window.location.pathname
+  });
+  btn.disabled = false;
+
+  if (error) {
+    console.error(error);
+    mostrarToast("Não foi possível enviar agora. Tente novamente em alguns minutos.");
+    return;
+  }
+  // Mesma mensagem exista o e-mail ou não, para não revelar quem tem cadastro
+  mostrarToast("Se o e-mail estiver cadastrado, você receberá o link em instantes.");
+});
+
+// O Supabase dispara este evento quando a pessoa chega pelo link do e-mail
+db.auth.onAuthStateChange((evento) => {
+  if (evento === "PASSWORD_RECOVERY") {
+    emRecuperacao = true;
+    $('.tab[data-tab="atualizar"]').click();  // abre a aba certa
+    atualizarCaixas();
+  }
+});
+
+async function salvarNovaSenha() {
+  const senha = $("#nova-senha").value;
+  const confirma = $("#nova-senha-confirma").value;
+
+  if (senha.length < 6) { mostrarToast("A senha precisa ter pelo menos 6 caracteres."); return; }
+  if (senha !== confirma) { mostrarToast("As senhas não são iguais."); return; }
+
+  const { error } = await db.auth.updateUser({ password: senha });
+  if (error) {
+    console.error(error);
+    mostrarToast("Não foi possível salvar a senha. Peça um novo link e tente de novo.");
+    return;
+  }
+
+  $("#nova-senha").value = "";
+  $("#nova-senha-confirma").value = "";
+  emRecuperacao = false;
+  history.replaceState(null, "", window.location.pathname + window.location.search); // limpa o token da URL
+  atualizarCaixas();
+  mostrarToast("Senha alterada com sucesso!");
+}
+
+$("#btn-salvar-senha").addEventListener("click", salvarNovaSenha);
+$("#nova-senha-confirma").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") salvarNovaSenha();
 });
 
 // ---------- 12. ABA FLUXO DO CULTO ----------

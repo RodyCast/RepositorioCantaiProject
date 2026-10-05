@@ -119,6 +119,44 @@
             <input type="password" id="login-senha" autocomplete="current-password" />
           </div>
           <button class="btn btn--primary" id="btn-login" type="button">Entrar</button>
+          <button class="btn-link" id="btn-esqueci" type="button">Esqueci minha senha</button>
+        </div>
+      </div>
+
+      <!-- Pedir o link de redefinição -->
+      <div class="card" id="recuperar-box" hidden>
+        <div class="card__header">
+          <h2>Redefinir senha</h2>
+          <p>Informe seu e-mail. Enviaremos um link para você criar uma nova senha.</p>
+        </div>
+        <div class="form">
+          <div class="campo">
+            <label for="recuperar-email">E-mail</label>
+            <input type="email" id="recuperar-email" autocomplete="username" />
+          </div>
+          <div class="form-acoes">
+            <button class="btn btn--primary" id="btn-enviar-link" type="button">Enviar link</button>
+            <button class="btn btn--ghost" id="btn-voltar-login" type="button">Voltar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Definir a nova senha (aparece quando a pessoa chega pelo link do e-mail) -->
+      <div class="card" id="nova-senha-box" hidden>
+        <div class="card__header">
+          <h2>Criar nova senha</h2>
+          <p>Escolha uma senha com pelo menos 6 caracteres.</p>
+        </div>
+        <div class="form">
+          <div class="campo">
+            <label for="nova-senha">Nova senha</label>
+            <input type="password" id="nova-senha" autocomplete="new-password" />
+          </div>
+          <div class="campo">
+            <label for="nova-senha-confirma">Repita a nova senha</label>
+            <input type="password" id="nova-senha-confirma" autocomplete="new-password" />
+          </div>
+          <button class="btn btn--primary" id="btn-salvar-senha" type="button">Salvar nova senha</button>
         </div>
       </div>
 

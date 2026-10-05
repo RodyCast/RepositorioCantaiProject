@@ -492,3 +492,24 @@ GRÁFICO DEFLUXO
 body:not(.logado) .so-logado { display: none !important; }
 
 .barra-sessao { margin-bottom: 1rem; }
+
+/* Link discreto (ex.: "Esqueci minha senha") */
+.btn-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--salvia-profunda);
+  text-decoration: underline;
+  cursor: pointer;
+  justify-self: start;
+}
+.btn-link:hover { color: var(--texto); }
+
+/* Botões lado a lado nos formulários */
+.form-acoes {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}

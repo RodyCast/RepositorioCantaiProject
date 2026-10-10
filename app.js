@@ -50,14 +50,38 @@ function mostrarToast(msg) {
 }
 
 // ---------- 4. TABS ----------
+const posicaoPorAba = {};     // guarda o scroll de cada aba (como um Dictionary<string, int>)
+let abaAtual = "repositorio"; // aba que começa ativa
+
 $$(".tab").forEach((btn) => {
   btn.addEventListener("click", () => {
+    const nova = btn.dataset.tab;
+    if (nova === abaAtual) return;
+
+    // 1) Salva a posição da aba que está saindo, ANTES de esconder o painel
+    posicaoPorAba[abaAtual] = window.scrollY;
+
+    // 2) Troca de aba (igual ao que já existia)
     $$(".tab").forEach((b) => b.classList.remove("tab--active"));
     $$(".panel").forEach((p) => p.classList.remove("panel--active"));
     btn.classList.add("tab--active");
-    $(`#panel-${btn.dataset.tab}`).classList.add("panel--active");
+    $(`#panel-${nova}`).classList.add("panel--active");
+    abaAtual = nova;
+
+    // 3) Restaura a posição da aba que está entrando (0 se nunca foi visitada)
+    window.scrollTo({ top: posicaoPorAba[nova] ?? 0, behavior: "instant" });
   });
 });
+
+// Marca a barra de abas quando ela gruda no topo
+const sentinela = $("#tabs-sentinela");
+const barraAbas = $("#tabs-barra");
+
+new IntersectionObserver(([entrada]) => {
+  // Fora da tela por ter passado do topo = barra grudada
+  const grudada = !entrada.isIntersecting && entrada.boundingClientRect.top < 0;
+  barraAbas.classList.toggle("tabs-barra--grudada", grudada);
+}).observe(sentinela);
 
 // ---------- 5. FILTROS (aba Repositório) ----------
 function popularSelectsDeFiltro() {

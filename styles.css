@@ -92,8 +92,13 @@ h1, h2, h3 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; letter-s
   padding: 0.35rem;
   border-radius: 999px;
   border: 1px solid var(--borda);
-  box-shadow: var(--sombra-sm);
+  box-shadow: var(--sombra-md);
   margin-bottom: 2rem;
+
+  /* fixa no topo ao rolar a página */
+  position: sticky;
+  top: 0.75rem;
+  z-index: 30;
 }
 .tab {
   border: 0; background: transparent;
@@ -105,6 +110,26 @@ h1, h2, h3 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; letter-s
 }
 .tab:hover { color: var(--texto); }
 .tab--active { background: var(--salvia-escura); color: white; box-shadow: var(--sombra-sm); }
+
+#tabs-sentinela { height: 1px; margin-bottom: -1px; }
+
+.tabs-barra {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 1.25rem;
+  background: var(--creme);
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--transicao), box-shadow var(--transicao);
+}
+
+/* aplicada pelo JS quando a barra está grudada no topo */
+.tabs-barra--grudada {
+  border-bottom-color: var(--borda);
+  box-shadow: var(--sombra-sm);
+}
 
 .panel { display: none; animation: fade 240ms ease; }
 .panel--active { display: block; }

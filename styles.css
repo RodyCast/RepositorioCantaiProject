@@ -94,6 +94,8 @@ h1, h2, h3 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; letter-s
   border: 1px solid var(--borda);
   box-shadow: var(--sombra-md);
   margin-bottom: 2rem;
+  max-width: 100%;
+  overflow-x: auto; /* com 4 abas, rola na horizontal em telas estreitas */
 
   /* fixa no topo ao rolar a página */
   position: sticky;
@@ -516,6 +518,9 @@ GRÁFICO DEFLUXO
 /* Itens que só aparecem para quem está logado */
 body:not(.logado) .so-logado { display: none !important; }
 
+/* Itens que só aparecem para quem pode editar músicas */
+body:not(.editor) .so-editor { display: none !important; }
+
 .barra-sessao { margin-bottom: 1rem; }
 
 /* Link discreto (ex.: "Esqueci minha senha") */
@@ -531,6 +536,35 @@ body:not(.logado) .so-logado { display: none !important; }
   justify-self: start;
 }
 .btn-link:hover { color: var(--texto); }
+
+/* Formulário da aba Gerenciar Músicas (duas colunas) */
+.form--musica {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  max-width: 720px;
+}
+.campo--largo { grid-column: 1 / -1; }
+.campo-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.campo-check input { width: 1.05rem; height: 1.05rem; accent-color: var(--salvia-escura); }
+
+/* Campo obrigatório deixado vazio */
+.campo--erro label { color: #b85a3a; }
+.campo--erro input, .campo--erro select { border-color: #b85a3a; }
+
+/* Sequência de notas (1ª Nota): uma lista de seleção por nota */
+.notas-lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.nota-item { display: flex; gap: 4px; align-items: center; }
+.nota-item select { padding: 0.5rem 0.6rem; }
 
 /* Botões lado a lado nos formulários */
 .form-acoes {

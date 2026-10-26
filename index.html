@@ -34,6 +34,7 @@
           <button class="tab tab--active" data-tab="repositorio" role="tab">Repositório</button>
           <button class="tab" data-tab="atualizar" role="tab">Atualizar Data</button>
           <button class="tab" data-tab="fluxo" role="tab">Fluxo do Culto</button>
+          <button class="tab so-editor" data-tab="musicas" role="tab">Gerenciar Músicas</button>
         </nav>
     </div>
 
@@ -269,6 +270,68 @@
             <div class="grafico-legenda" id="grafico-legenda">
               <!-- Resumo textual do formato -->
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ABA 4: GERENCIAR MÚSICAS (só aparece para quem tem perfis.pode_editar_musicas) -->
+    <section class="panel" id="panel-musicas">
+      <div class="card">
+        <div class="card__header">
+          <h2>Gerenciar músicas</h2>
+          <p>Escolha uma música para editar ou cadastre uma nova.</p>
+        </div>
+        <div class="form form--musica">
+          <div class="campo">
+            <label for="select-editar">Música</label>
+            <select id="select-editar">
+              <option value="">— Nova música —</option>
+            </select>
+          </div>
+          <button class="btn btn--ghost" id="btn-nova-musica" type="button">+ Nova música</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__header">
+          <h2 id="form-musica-titulo">Nova música</h2>
+          <p>Preencha os dados e clique em salvar.</p>
+        </div>
+        <div class="form form--musica">
+          <div class="campo campo--largo">
+            <label for="musica-nome">Nome *</label>
+            <input type="text" id="musica-nome" autocomplete="off" />
+          </div>
+          <div class="campo campo--largo">
+            <label>1ª Nota (sequência de notas, na ordem)</label>
+            <div class="notas-lista" id="musica-notas"></div>
+          </div>
+          <div class="campo">
+            <label for="musica-acorde">Acorde</label>
+            <select id="musica-acorde"></select>
+          </div>
+          <div class="campo">
+            <label for="musica-fluxo">Fluxo</label>
+            <select id="musica-fluxo"></select>
+          </div>
+          <div class="campo">
+            <label for="musica-compasso">Compasso</label>
+            <select id="musica-compasso"></select>
+          </div>
+          <div class="campo">
+            <label for="musica-compasso-2">Muda para (opcional)</label>
+            <select id="musica-compasso-2"></select>
+          </div>
+          <label class="campo-check">
+            <input type="checkbox" id="musica-sobe" /> Sobe meio tom
+          </label>
+          <label class="campo-check">
+            <input type="checkbox" id="musica-desce" /> Desce meio tom
+          </label>
+          <div class="form-acoes campo--largo">
+            <button class="btn btn--primary" id="btn-salvar-musica" type="button">Cadastrar música</button>
+            <button class="btn btn--ghost" id="btn-cancelar-musica" type="button">Limpar</button>
           </div>
         </div>
       </div>

@@ -16,6 +16,7 @@ let louvores = [];
 let filtros = { busca: "", acorde: "", fluxo: "", status: "" };
 let ordenacao = { campo: "nome", asc: true };
 let grupoId = null; // grupo de quem está logado (null = visitante)
+let podeEditarMusicas = false; 
 
 // ---------- 3. HELPERS ----------
 const $ = (sel) => document.querySelector(sel);
@@ -354,12 +355,13 @@ async function carregarDados() {
 
   const datas = {};
   grupoId = null;
+  podeEditarMusicas = false;
 
   const { data: { session } } = await db.auth.getSession();
   if (session) {
     const { data: perfil, error: e1 } = await db
       .from('perfis')
-      .select('grupo_id')
+      .select('grupo_id, pode_editar_musicas')
       .eq('user_id', session.user.id)
       .maybeSingle();
     if (e1) throw e1;
@@ -369,6 +371,7 @@ async function carregarDados() {
       throw new Error("Usuário sem grupo vinculado.");
     }
     grupoId = perfil.grupo_id;
+    podeEditarMusicas = perfil.pode_editar_musicas === true;
 
     const { data: uts, error: e2 } = await db
       .from('utilizacoes')
@@ -390,6 +393,7 @@ async function recarregarTudo() {
   const logado = grupoId !== null;
 
   document.body.classList.toggle("logado", logado);
+  document.body.classList.toggle("editor", podeEditarMusicas);
   atualizarCaixas();
 
   // zera filtros, ordenação por data e seleção da aba Atualizar
@@ -407,6 +411,10 @@ async function recarregarTudo() {
   renderTabela();
   atualizarPreview();
   inicializarFluxo();
+  popularAbaMusicas();
+
+  // quem saiu (ou entrou sem permissão) não pode continuar numa aba restrita
+  if (!podeEditarMusicas && abaAtual === "musicas") $('.tab[data-tab="repositorio"]').click();
 }
 
 async function iniciarAplicacao() {
@@ -817,5 +825,195 @@ $("#btn-limpar-fluxo").addEventListener("click", () => {
     mostrarToast("Fluxo redefinido para o padrão.");
   }
 });
+
+// ---------- 13. ABA GERENCIAR MÚSICAS ----------
+let musicaEditando = null; // null = cadastrando uma música nova
+let notasEditando = [];    // sequência da "1ª Nota", ex.: ["A#2", "D#3", "F3"]
+
+// Valores permitidos (seguem o padrão de escrita já usado no banco)
+const NOTAS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const NOTAS_COM_OITAVA = [2, 3, 4].flatMap((oitava) => NOTAS.map((n) => `${n}${oitava}`));
+const MAX_NOTAS = 8;
+// Para cada tom: maior, menor e menor com a relativa maior (ex.: "C", "Cm", "Cm / D#")
+const ACORDES = NOTAS.flatMap((n, i) => [n, `${n}m`, `${n}m / ${NOTAS[(i + 3) % 12]}`]);
+const FLUXOS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) =>
+  `${num <= 5 ? "Contemplação" : "Celebração"} ${String(num).padStart(2, "0")}`);
+// Quando o compasso muda na música, é salvo como "4/4 - 2/4"
+const COMPASSOS = ["2/2", "2/4", "3/4", "4/4", "6/4", "9/4", "3/8", "6/8", "9/8", "12/8"];
+
+// Monta as <option> de uma lista. Se a música já tem um valor fora do padrão,
+// ele aparece marcado, para não ser apagado sem querer ao salvar outros campos.
+function opcoesDaLista(lista, valorAtual) {
+  let html = lista.map((v) => `<option value="${v}">${v}</option>`).join("");
+  if (valorAtual && !lista.includes(valorAtual)) {
+    html = `<option value="${valorAtual}">${valorAtual} (fora do padrão)</option>` + html;
+  }
+  return html;
+}
+
+function renderNotas() {
+  const caixa = $("#musica-notas");
+  caixa.innerHTML = notasEditando.map((nota, i) => `
+    <div class="nota-item">
+      <select class="select-nota" data-index="${i}" aria-label="Nota ${i + 1}">
+        <option value="">—</option>
+        ${opcoesDaLista(NOTAS_COM_OITAVA, nota)}
+      </select>
+      ${notasEditando.length > 1 ? `<button type="button" class="btn btn--ghost btn--sm btn-remover-extra btn-remover-nota" data-index="${i}" title="Remover nota">×</button>` : ""}
+    </div>`).join("") +
+    (notasEditando.length < MAX_NOTAS ? `<button type="button" class="btn btn--ghost btn--sm" id="btn-add-nota">+ Nota</button>` : "");
+
+  $$("#musica-notas .select-nota").forEach((sel) => { sel.value = notasEditando[sel.dataset.index]; });
+}
+
+$("#musica-notas").addEventListener("change", (e) => {
+  if (e.target.matches(".select-nota")) notasEditando[e.target.dataset.index] = e.target.value;
+});
+$("#musica-notas").addEventListener("click", (e) => {
+  if (e.target.id === "btn-add-nota") {
+    notasEditando.push("");
+    renderNotas();
+  } else if (e.target.matches(".btn-remover-nota")) {
+    notasEditando.splice(Number(e.target.dataset.index), 1);
+    renderNotas();
+  }
+});
+
+function popularAbaMusicas() {
+  const sel = $("#select-editar");
+  sel.innerHTML = '<option value="">— Nova música —</option>';
+  const opcoes = [...louvores]
+    .sort((a, b) => a.nome.localeCompare(b.nome))
+    .map((l) => `<option value="${l.id}">${l.nome}</option>`).join("");
+  sel.insertAdjacentHTML("beforeend", opcoes);
+
+  preencherFormMusica(musicaEditando ? louvores.find((l) => l.id === musicaEditando.id) ?? null : null);
+}
+
+function preencherFormMusica(musica) {
+  musicaEditando = musica;
+  $$("#panel-musicas .campo--erro").forEach((c) => c.classList.remove("campo--erro"));
+  $("#select-editar").value = musica ? musica.id : "";
+  $("#musica-nome").value     = musica?.nome ?? "";
+  $("#musica-acorde").innerHTML = '<option value="">Selecione...</option>' + opcoesDaLista(ACORDES, musica?.acorde);
+  $("#musica-fluxo").innerHTML  = '<option value="">Selecione...</option>' + opcoesDaLista(FLUXOS, musica?.fluxo_culto);
+  $("#musica-acorde").value   = musica?.acorde ?? "";
+  $("#musica-fluxo").value    = musica?.fluxo_culto ?? "";
+  notasEditando = musica?.primeiras_notas ? musica.primeiras_notas.split("-") : [""];
+  renderNotas();
+  const [compasso = "", compasso2 = ""] = musica?.compasso ? musica.compasso.split(" - ") : [];
+  $("#musica-compasso").innerHTML   = '<option value="">Selecione...</option>' + opcoesDaLista(COMPASSOS, compasso);
+  $("#musica-compasso-2").innerHTML = '<option value="">Não muda</option>' + opcoesDaLista(COMPASSOS, compasso2);
+  $("#musica-compasso").value   = compasso;
+  $("#musica-compasso-2").value = compasso2;
+  $("#musica-sobe").checked   = !!musica?.sobe_meio_tom;
+  $("#musica-desce").checked  = !!musica?.desce_meio_tom;
+  $("#form-musica-titulo").textContent = musica ? `Editar "${musica.nome}"` : "Nova música";
+  $("#btn-salvar-musica").textContent  = musica ? "Salvar alterações" : "Cadastrar música";
+}
+
+$("#select-editar").addEventListener("change", (e) => {
+  const id = Number(e.target.value);
+  preencherFormMusica(louvores.find((l) => l.id === id) || null);
+});
+$("#btn-nova-musica").addEventListener("click", () => {
+  preencherFormMusica(null);
+  $("#musica-nome").focus();
+});
+$("#btn-cancelar-musica").addEventListener("click", () => preencherFormMusica(musicaEditando));
+
+$("#btn-salvar-musica").addEventListener("click", async () => {
+  const dados = {
+    nome:            $("#musica-nome").value.trim(),
+    primeiras_notas: notasEditando.join("-"),
+    acorde:          $("#musica-acorde").value,
+    fluxo_culto:     $("#musica-fluxo").value,
+    compasso:        [$("#musica-compasso").value, $("#musica-compasso-2").value].filter(Boolean).join(" - "),
+    sobe_meio_tom:   $("#musica-sobe").checked,
+    desce_meio_tom:  $("#musica-desce").checked,
+  };
+
+  const faltando = validarFormMusica(dados);
+  if (faltando.length) { mostrarToast(`Preencha: ${faltando.join(", ")}.`); return; }
+  if ($("#musica-compasso-2").value === $("#musica-compasso").value) {
+    mostrarToast('O compasso em "Muda para" precisa ser diferente do principal.');
+    return;
+  }
+  const repetida = louvores.find((l) =>
+    l.nome.toLowerCase() === dados.nome.toLowerCase() && l.id !== musicaEditando?.id);
+  if (repetida) { mostrarToast("Já existe uma música com esse nome."); return; }
+
+  const btn = $("#btn-salvar-musica");
+  btn.disabled = true;
+  try {
+    const salva = await salvarMusicaNoBanco(musicaEditando?.id ?? null, dados);
+    if (musicaEditando) {
+      Object.assign(musicaEditando, dados);
+    } else {
+      musicaEditando = { ...salva, ultima_utilizacao: null };
+      louvores.push(musicaEditando);
+    }
+    mostrarToast(`"${dados.nome}" salva com sucesso!`);
+    atualizarTelasAposEdicao();
+  } catch (err) {
+    mostrarToast("Erro ao salvar a música. Tente novamente.");
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Marca em vermelho os campos obrigatórios vazios e devolve os nomes deles.
+// Só "Muda para" é opcional; Sobe/Desce tom são caixas de marcar (desmarcada = Não).
+function validarFormMusica(dados) {
+  const faltando = [];
+  const marcar = (seletor, rotulo, vazio) => {
+    $(seletor).closest(".campo").classList.toggle("campo--erro", vazio);
+    if (vazio) faltando.push(rotulo);
+  };
+  marcar("#musica-nome", "Nome", !dados.nome);
+  marcar("#musica-notas", "1ª Nota (escolha ou remova as notas em —)", notasEditando.some((n) => !n));
+  marcar("#musica-acorde", "Acorde", !dados.acorde);
+  marcar("#musica-fluxo", "Fluxo", !dados.fluxo_culto);
+  marcar("#musica-compasso", "Compasso", !$("#musica-compasso").value);
+  return faltando;
+}
+
+// Tira o destaque de erro assim que o campo é preenchido
+["input", "change"].forEach((evento) =>
+  $("#panel-musicas").addEventListener(evento, (e) =>
+    e.target.closest(".campo")?.classList.remove("campo--erro")));
+
+async function salvarMusicaNoBanco(id, dados) {
+  const consulta = id
+    ? db.from('musicas').update(dados).eq('id', id)
+    : db.from('musicas').insert(dados);
+  const { data, error } = await consulta.select();
+
+  if (error) {
+    console.error("Erro ao salvar música no Supabase:", error);
+    throw error;
+  }
+  if (!data || data.length === 0) {
+    throw new Error("Nenhuma linha gravada (sem permissão).");
+  }
+  return data[0];
+}
+
+// Redesenha as outras abas sem perder filtros e seleções atuais
+function atualizarTelasAposEdicao() {
+  popularSelectsDeFiltro();
+  $("#filtro-acorde").value = filtros.acorde;
+  $("#filtro-fluxo").value  = filtros.fluxo;
+  $("#filtro-status").value = filtros.status;
+
+  popularSelectLouvores();
+  if (louvorSelecionado) $("#select-louvor").value = louvorSelecionado.id;
+
+  renderTabela();
+  atualizarPreview();
+  renderFluxo();
+  popularAbaMusicas();
+}
 
 document.addEventListener("DOMContentLoaded", iniciarAplicacao);

@@ -16,7 +16,9 @@ let louvores = [];
 let filtros = { busca: "", acorde: "", fluxo: "", status: "" };
 let ordenacao = { campo: "nome", asc: true };
 let grupoId = null; // grupo de quem está logado (null = visitante)
-let podeEditarMusicas = false; 
+let podeEditarMusicas = false;
+let emailUsuario = "";
+let nomeGrupo = "";
 
 // ---------- 3. HELPERS ----------
 const $ = (sel) => document.querySelector(sel);
@@ -356,12 +358,16 @@ async function carregarDados() {
   const datas = {};
   grupoId = null;
   podeEditarMusicas = false;
+  emailUsuario = "";
+  nomeGrupo = "";
 
   const { data: { session } } = await db.auth.getSession();
   if (session) {
+    emailUsuario = session.user.email ?? "";
+    // grupos(nome) traz o nome do grupo junto, pela chave grupo_id (em SQL, um JOIN)
     const { data: perfil, error: e1 } = await db
       .from('perfis')
-      .select('grupo_id, pode_editar_musicas')
+      .select('grupo_id, pode_editar_musicas, grupos(nome)')
       .eq('user_id', session.user.id)
       .maybeSingle();
     if (e1) throw e1;
@@ -372,6 +378,7 @@ async function carregarDados() {
     }
     grupoId = perfil.grupo_id;
     podeEditarMusicas = perfil.pode_editar_musicas === true;
+    nomeGrupo = perfil.grupos?.nome ?? "";
 
     const { data: uts, error: e2 } = await db
       .from('utilizacoes')
@@ -394,7 +401,7 @@ async function recarregarTudo() {
 
   document.body.classList.toggle("logado", logado);
   document.body.classList.toggle("editor", podeEditarMusicas);
-  atualizarCaixas();
+  atualizarSessao();
 
   // zera filtros, ordenação por data e seleção da aba Atualizar
   filtros = { busca: "", acorde: "", fluxo: "", status: "" };
@@ -415,6 +422,7 @@ async function recarregarTudo() {
 
   // quem saiu (ou entrou sem permissão) não pode continuar numa aba restrita
   if (!podeEditarMusicas && abaAtual === "musicas") $('.tab[data-tab="repositorio"]').click();
+  if (!logado && abaAtual === "atualizar") $('.tab[data-tab="repositorio"]').click();
 }
 
 async function iniciarAplicacao() {
@@ -426,114 +434,191 @@ async function iniciarAplicacao() {
   }
 }
 
-async function fazerLogin() {
+// ---------- 11.1 JANELA DE LOGIN ----------
+const authDialog = $("#auth-dialog");
+
+// Mostra só uma etapa da janela: "entrar", "recuperar", "enviado" ou "nova-senha"
+function mostrarEtapa(nome) {
+  authDialog.querySelectorAll(".auth__etapa").forEach((el) => {
+    el.hidden = el.dataset.etapa !== nome;
+  });
+  authDialog.querySelectorAll(".auth__erro").forEach((el) => (el.hidden = true));
+  const primeiro = authDialog.querySelector(`[data-etapa="${nome}"] input`);
+  if (primeiro) primeiro.focus();
+}
+
+function abrirLogin() {
+  if (!authDialog.open) authDialog.showModal();
+  mostrarEtapa("entrar");
+}
+
+function fecharLogin() {
+  authDialog.close();
+}
+
+$("#btn-abrir-login").addEventListener("click", abrirLogin);
+$("#auth-fechar").addEventListener("click", fecharLogin);
+
+// Clique no fundo escurecido (fora da caixa) fecha a janela
+authDialog.addEventListener("click", (e) => {
+  if (e.target === authDialog) fecharLogin();
+});
+
+function mostrarErro(id, msg) {
+  const el = $(id);
+  el.textContent = msg;
+  el.hidden = false;
+}
+
+// Desabilita o botão e mostra o spinner enquanto espera o Supabase
+function carregando(btn, ativo) {
+  btn.disabled = ativo;
+  btn.classList.toggle("btn--carregando", ativo);
+}
+
+// Botão de olho: mostra/esconde a senha
+$$(".campo-senha__olho").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const input = document.getElementById(btn.dataset.alvo);
+    const mostrar = input.type === "password";
+    input.type = mostrar ? "text" : "password";
+    btn.classList.toggle("campo-senha__olho--ativo", mostrar);
+    btn.setAttribute("aria-label", mostrar ? "Esconder senha" : "Mostrar senha");
+  });
+});
+
+$("#form-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
   const email = $("#login-email").value.trim();
   const password = $("#login-senha").value;
+  if (!email || !password) { mostrarErro("#login-erro", "Preencha e-mail e senha."); return; }
 
+  const btn = $("#btn-login");
+  carregando(btn, true);
   const { error } = await db.auth.signInWithPassword({ email, password });
   if (error) {
-    mostrarToast("E-mail ou senha incorretos.");
+    carregando(btn, false);
+    mostrarErro("#login-erro", "E-mail ou senha incorretos.");
     return;
   }
-  $("#login-senha").value = "";
+
   try {
     await recarregarTudo();
-    mostrarToast("Login realizado!");
   } catch (err) {
     console.error(err);
-    mostrarToast("Erro ao carregar os dados do seu grupo.");
+    carregando(btn, false);
+    mostrarErro("#login-erro", "Não foi possível carregar os dados do seu grupo.");
+    return;
   }
-}
 
-$("#btn-login").addEventListener("click", fazerLogin);
-$("#login-senha").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") fazerLogin();
+  carregando(btn, false);
+  $("#login-senha").value = "";
+  fecharLogin();
+  mostrarToast("Login realizado!");
 });
-
-$("#btn-logout").addEventListener("click", async () => {
-  await db.auth.signOut();
-  await recarregarTudo();
-  mostrarToast("Você saiu.");
-});
-
-// ---------- 11.1 REDEFINIÇÃO DE SENHA ----------
-let pedindoLink = false;    // true = mostrando a caixa "Enviar link"
-let emRecuperacao = false;  // true = a pessoa chegou pelo link do e-mail
-
-// Decide qual caixa da aba "Atualizar Data" fica visível
-function atualizarCaixas() {
-  const logado = grupoId !== null;
-  $("#login-box").hidden      = logado || pedindoLink || emRecuperacao;
-  $("#recuperar-box").hidden  = logado || !pedindoLink || emRecuperacao;
-  $("#nova-senha-box").hidden = !emRecuperacao;
-  $("#area-atualizar").hidden = !logado || emRecuperacao;
-}
 
 $("#btn-esqueci").addEventListener("click", () => {
-  pedindoLink = true;
   $("#recuperar-email").value = $("#login-email").value;
-  atualizarCaixas();
+  mostrarEtapa("recuperar");
 });
 
-$("#btn-voltar-login").addEventListener("click", () => {
-  pedindoLink = false;
-  atualizarCaixas();
-});
+$("#btn-voltar-login").addEventListener("click", () => mostrarEtapa("entrar"));
+$("#btn-enviado-voltar").addEventListener("click", () => mostrarEtapa("entrar"));
 
-$("#btn-enviar-link").addEventListener("click", async () => {
+$("#form-recuperar").addEventListener("submit", async (e) => {
+  e.preventDefault();
   const email = $("#recuperar-email").value.trim();
-  if (!email) { mostrarToast("Informe seu e-mail."); return; }
+  if (!email) { mostrarErro("#recuperar-erro", "Informe seu e-mail."); return; }
 
   const btn = $("#btn-enviar-link");
-  btn.disabled = true;
+  carregando(btn, true);
   const { error } = await db.auth.resetPasswordForEmail(email, {
     redirectTo: window.location.origin + window.location.pathname
   });
-  btn.disabled = false;
+  carregando(btn, false);
 
   if (error) {
     console.error(error);
-    mostrarToast("Não foi possível enviar agora. Tente novamente em alguns minutos.");
+    mostrarErro("#recuperar-erro", "Não foi possível enviar agora. Tente novamente em alguns minutos.");
     return;
   }
   // Mesma mensagem exista o e-mail ou não, para não revelar quem tem cadastro
-  mostrarToast("Se o e-mail estiver cadastrado, você receberá o link em instantes.");
+  $("#enviado-email").textContent = email;
+  mostrarEtapa("enviado");
 });
 
 // O Supabase dispara este evento quando a pessoa chega pelo link do e-mail
 db.auth.onAuthStateChange((evento) => {
   if (evento === "PASSWORD_RECOVERY") {
-    emRecuperacao = true;
-    $('.tab[data-tab="atualizar"]').click();  // abre a aba certa
-    atualizarCaixas();
+    if (!authDialog.open) authDialog.showModal();
+    mostrarEtapa("nova-senha");
   }
 });
 
-async function salvarNovaSenha() {
+$("#form-nova-senha").addEventListener("submit", async (e) => {
+  e.preventDefault();
   const senha = $("#nova-senha").value;
   const confirma = $("#nova-senha-confirma").value;
 
-  if (senha.length < 6) { mostrarToast("A senha precisa ter pelo menos 6 caracteres."); return; }
-  if (senha !== confirma) { mostrarToast("As senhas não são iguais."); return; }
+  if (senha.length < 6) { mostrarErro("#nova-senha-erro", "A senha precisa ter pelo menos 6 caracteres."); return; }
+  if (senha !== confirma) { mostrarErro("#nova-senha-erro", "As senhas não são iguais."); return; }
 
+  const btn = $("#btn-salvar-senha");
+  carregando(btn, true);
   const { error } = await db.auth.updateUser({ password: senha });
+  carregando(btn, false);
   if (error) {
     console.error(error);
-    mostrarToast("Não foi possível salvar a senha. Peça um novo link e tente de novo.");
+    mostrarErro("#nova-senha-erro", "Não foi possível salvar a senha. Peça um novo link e tente de novo.");
     return;
   }
 
   $("#nova-senha").value = "";
   $("#nova-senha-confirma").value = "";
-  emRecuperacao = false;
   history.replaceState(null, "", window.location.pathname + window.location.search); // limpa o token da URL
-  atualizarCaixas();
+  fecharLogin();
   mostrarToast("Senha alterada com sucesso!");
+});
+
+// ---------- 11.2 SESSÃO (botão Entrar / chip com menu) ----------
+const sessaoChip = $("#sessao-chip");
+const sessaoMenu = $("#sessao-menu");
+
+// Atualiza o chip com as iniciais e o e-mail de quem está logado
+function atualizarSessao() {
+  $("#sessao-iniciais").textContent = (emailUsuario[0] ?? "?").toUpperCase();
+  $("#sessao-email").textContent = emailUsuario || "—";
+  $("#sessao-grupo").textContent = nomeGrupo;
+  $("#sessao-grupo").hidden = !nomeGrupo;
+  sessaoChip.title = emailUsuario;
+  fecharMenuSessao();
 }
 
-$("#btn-salvar-senha").addEventListener("click", salvarNovaSenha);
-$("#nova-senha-confirma").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") salvarNovaSenha();
+function fecharMenuSessao() {
+  sessaoMenu.hidden = true;
+  sessaoChip.setAttribute("aria-expanded", "false");
+}
+
+sessaoChip.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const abrir = sessaoMenu.hidden;
+  sessaoMenu.hidden = !abrir;
+  sessaoChip.setAttribute("aria-expanded", String(abrir));
+});
+
+// Fecha o menu ao clicar fora dele ou apertar Esc
+document.addEventListener("click", (e) => {
+  if (!sessaoMenu.hidden && !sessaoMenu.contains(e.target)) fecharMenuSessao();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") fecharMenuSessao();
+});
+
+$("#btn-logout").addEventListener("click", async () => {
+  fecharMenuSessao();
+  await db.auth.signOut();
+  await recarregarTudo();
+  mostrarToast("Você saiu.");
 });
 
 // ---------- 12. ABA FLUXO DO CULTO ----------
@@ -1016,4 +1101,4 @@ function atualizarTelasAposEdicao() {
   popularAbaMusicas();
 }
 
-document.addEventListener("DOMContentLoaded", iniciarAplicacao);
+document.addEventListener("DOMContentLoaded", iniciarAplicacao);

@@ -1160,96 +1160,319 @@ function extrairNumeroFluxo(fluxoTexto) {
   return match ? Number(match[0]) : null;
 }
 
-function renderizarGraficoFluxo() {
-  const gElementos = $("#grafico-elementos");
-  const divLegenda = $("#grafico-legenda");
-  if (!gElementos) return;
+// O gráfico é montado com elementos SVG de verdade (createElementNS + textContent),
+// no tamanho real da área, para os pontos não ficarem esticados.
+const SVG_NS = "http://www.w3.org/2000/svg";
+const grafico = { pontos: [], geo: null, ativo: null, larguraDesenhada: 0 };
+const LIMITE_ZONAS = 5.5; // até 5 = contemplação; de 6 em diante = celebração
 
-  // Todas as linhas de música do culto, na ordem dos momentos
-  const musicasNoFluxo = modeloAtual
-    .flatMap(linhasDaSecao)
-    .map((musicaId) => {
-      if (!musicaId) return { valor: null, nome: "Espaço vazio" };
-      const m = louvores.find(l => l.id === musicaId);
-      const valorFluxo = m ? extrairNumeroFluxo(m.fluxo_culto) : null;
-      return {
-        valor: valorFluxo,
-        nome: m ? escaparHtml(m.nome) : "Desconhecida"
-      };
+function svgEl(tag, attrs, pai) {
+  const el = document.createElementNS(SVG_NS, tag);
+  Object.entries(attrs ?? {}).forEach(([k, v]) => el.setAttribute(k, v));
+  if (pai) pai.appendChild(el);
+  return el;
+}
+
+const formatarMedia = (v) => v.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nomeZona = (v) => (v > LIMITE_ZONAS ? "Celebração" : "Contemplação");
+
+// Lista plana das linhas de música (na ordem do culto) e os grupos de cada momento
+function dadosGrafico() {
+  const pontos = [];
+  const grupos = [];
+  modeloAtual.forEach((secao) => {
+    const linhas = linhasDaSecao(secao);
+    if (!linhas.length) return;
+    const inicio = pontos.length;
+    linhas.forEach((musicaId) => {
+      const m = musicaId ? louvores.find((l) => l.id === musicaId) : null;
+      const valor = m ? extrairNumeroFluxo(m.fluxo_culto) : null;
+      pontos.push({
+        ordem: pontos.length + 1,
+        secao: secao.titulo,
+        nome: m?.nome ?? null,
+        valor: valor === null ? null : Math.max(1, Math.min(10, valor))
+      });
     });
+    grupos.push({ titulo: secao.titulo, inicio, fim: pontos.length - 1 });
+  });
+  return { pontos, grupos };
+}
 
-  const total = musicasNoFluxo.length;
-  if (total === 0) {
-    gElementos.innerHTML = `<text x="300" y="75" text-anchor="middle" fill="#94a3b8" font-size="14">Preencha o fluxo para ver a curva do culto</text>`;
-    divLegenda.innerHTML = "<p>Nenhuma música selecionada no momento.</p>";
+// Curva suave que não "passa do ponto" (interpolação monótona de Fritsch–Carlson):
+// a linha nunca sobe acima ou desce abaixo dos valores reais entre dois louvores.
+function segmentosMonotonos(pts) {
+  const n = pts.length;
+  const d = [];
+  for (let k = 0; k < n - 1; k++) d.push((pts[k + 1][1] - pts[k][1]) / (pts[k + 1][0] - pts[k][0]));
+  const t = pts.map((_, k) => {
+    if (k === 0) return d[0];
+    if (k === n - 1) return d[n - 2];
+    return d[k - 1] * d[k] <= 0 ? 0 : (d[k - 1] + d[k]) / 2;
+  });
+  for (let k = 0; k < n - 1; k++) {
+    if (d[k] === 0) { t[k] = 0; t[k + 1] = 0; continue; }
+    const a = t[k] / d[k], b = t[k + 1] / d[k], s = a * a + b * b;
+    if (s > 9) { const f = 3 / Math.sqrt(s); t[k] = f * a * d[k]; t[k + 1] = f * b * d[k]; }
+  }
+  const segs = [];
+  for (let k = 0; k < n - 1; k++) {
+    const [x0, y0] = pts[k], [x1, y1] = pts[k + 1], h = (x1 - x0) / 3;
+    segs.push(`${x0 + h} ${y0 + t[k] * h}, ${x1 - h} ${y1 - t[k + 1] * h}, ${x1} ${y1}`);
+  }
+  return segs;
+}
+
+// Escreve o texto; se não couber na largura, encurta com reticências.
+// Se nem 3 letras couberem, o rótulo some (o momento continua na dica do ponto).
+function caberTexto(el, texto, largura) {
+  el.textContent = texto;
+  if (el.getComputedTextLength() <= largura) return;
+  for (let i = texto.length - 1; i >= 3; i--) {
+    el.textContent = texto.slice(0, i).trimEnd() + "…";
+    if (el.getComputedTextLength() <= largura) return;
+  }
+  el.remove();
+}
+
+function renderizarGraficoFluxo() {
+  const area = $("#grafico-area");
+  const svg = $("#svg-grafico");
+  if (!area || !svg) return;
+
+  const { pontos, grupos } = dadosGrafico();
+  grafico.pontos = pontos;
+  grafico.ativo = null;
+  esconderDicaGrafico();
+  renderAnaliseFluxo(pontos);
+
+  const W = area.clientWidth;
+  grafico.larguraDesenhada = W;
+  if (!W) return; // aba escondida: o ResizeObserver redesenha quando ela aparecer
+
+  const H = W < 520 ? 230 : 270;
+  const m = { top: 12, right: 8, bottom: 46, left: 28 };
+  const plotW = W - m.left - m.right;
+  const plotH = H - m.top - m.bottom;
+  const base = m.top + plotH;
+  const passo = plotW / Math.max(pontos.length, 1);
+  const x = (i) => m.left + passo * (i + 0.5);
+  const y = (v) => m.top + ((10 - v) / 9) * plotH;
+  grafico.geo = { m, plotW, plotH, base, passo, x, y, W };
+
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.style.height = `${H}px`;
+  svg.replaceChildren();
+
+  // Degradê da área e recorte arredondado das faixas
+  const defs = svgEl("defs", {}, svg);
+  const grad = svgEl("linearGradient", { id: "grafico-degrade", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+  svgEl("stop", { offset: "0%", class: "grafico-degrade-topo" }, grad);
+  svgEl("stop", { offset: "100%", class: "grafico-degrade-base" }, grad);
+  const clip = svgEl("clipPath", { id: "grafico-recorte" }, defs);
+  svgEl("rect", { x: m.left, y: m.top, width: plotW, height: plotH, rx: 10 }, clip);
+
+  // Faixas das zonas
+  const yLimite = y(LIMITE_ZONAS);
+  const zonas = svgEl("g", { "clip-path": "url(#grafico-recorte)" }, svg);
+  svgEl("rect", { x: m.left, y: m.top, width: plotW, height: yLimite - m.top, class: "grafico-zona grafico-zona--celebracao" }, zonas);
+  svgEl("rect", { x: m.left, y: yLimite, width: plotW, height: base - yLimite, class: "grafico-zona grafico-zona--contemplacao" }, zonas);
+  svgEl("text", { x: m.left + 12, y: m.top + 18, class: "grafico-zona-rotulo" }, svg).textContent = "Celebração";
+  svgEl("text", { x: m.left + 12, y: base - 10, class: "grafico-zona-rotulo" }, svg).textContent = "Contemplação";
+
+  // Eixo Y: linhas finas em 1, 5 e 10
+  [10, 5, 1].forEach((v) => {
+    svgEl("line", { x1: m.left, x2: m.left + plotW, y1: y(v), y2: y(v), class: "grafico-grade" }, svg);
+    svgEl("text", { x: m.left - 8, y: y(v), class: "grafico-eixo", "text-anchor": "end", "dominant-baseline": "middle" }, svg).textContent = v;
+  });
+
+  // Eixo X: divisórias e nomes dos momentos, e a posição de cada música
+  grupos.forEach((g, gi) => {
+    const x0 = m.left + passo * g.inicio;
+    const x1 = m.left + passo * (g.fim + 1);
+    if (gi > 0) svgEl("line", { x1: x0, x2: x0, y1: m.top, y2: H - 4, class: "grafico-divisoria" }, svg);
+    const rotulo = svgEl("text", { x: (x0 + x1) / 2, y: H - 10, class: "grafico-momento", "text-anchor": "middle" }, svg);
+    caberTexto(rotulo, g.titulo, x1 - x0 - 8);
+  });
+  if (passo >= 18) {
+    pontos.forEach((p, i) => {
+      svgEl("text", { x: x(i), y: base + 17, class: "grafico-ordem", "text-anchor": "middle" }, svg).textContent = p.ordem;
+    });
+  }
+
+  // Linha da mira (aparece no hover)
+  grafico.mira = svgEl("line", { y1: m.top, y2: base, class: "grafico-mira", visibility: "hidden" }, svg);
+
+  // Espaços ainda vazios: marcador vazado sobre o eixo
+  pontos.forEach((p, i) => {
+    if (p.valor === null) svgEl("circle", { cx: x(i), cy: base, r: 3.5, class: "grafico-vazio", "data-i": i }, svg);
+  });
+
+  const validos = pontos
+    .map((p, i) => ({ i, px: x(i), py: p.valor === null ? null : y(p.valor) }))
+    .filter((p) => p.py !== null);
+
+  if (!validos.length) {
+    svgEl("text", { x: m.left + plotW / 2, y: m.top + plotH / 2, class: "grafico-mensagem", "text-anchor": "middle", "dominant-baseline": "middle" }, svg)
+      .textContent = pontos.length ? "Escolha os louvores acima para ver a curva do culto" : "O modelo não tem momentos com música";
+  }
+
+  if (validos.length > 1) {
+    const segs = segmentosMonotonos(validos.map((p) => [p.px, p.py]));
+    const primeiro = validos[0], ultimo = validos[validos.length - 1];
+    const curva = `M ${primeiro.px} ${primeiro.py}` + segs.map((s) => ` C ${s}`).join("");
+    svgEl("path", { d: `${curva} L ${ultimo.px} ${base} L ${primeiro.px} ${base} Z`, class: "grafico-preenchimento" }, svg);
+
+    // Trecho entre músicas vizinhas = linha cheia; se pula um espaço vazio = tracejada
+    let cheia = "", lacuna = "";
+    segs.forEach((s, k) => {
+      const trecho = `M ${validos[k].px} ${validos[k].py} C ${s} `;
+      if (validos[k + 1].i - validos[k].i === 1) cheia += trecho; else lacuna += trecho;
+    });
+    if (lacuna) svgEl("path", { d: lacuna, class: "grafico-linha grafico-linha--lacuna" }, svg);
+    if (cheia) svgEl("path", { d: cheia, class: "grafico-linha" }, svg);
+  }
+
+  validos.forEach((p) => svgEl("circle", { cx: p.px, cy: p.py, r: 5, class: "grafico-ponto", "data-i": p.i }, svg));
+
+  const preenchidos = validos.length;
+  svg.setAttribute("aria-label",
+    `Curva do culto: ${preenchidos} de ${pontos.length} louvores escolhidos. Use as setas para percorrer as músicas.`);
+}
+
+// ----- Dica (tooltip) e navegação -----
+
+function esconderDicaGrafico() {
+  const dica = $("#grafico-dica");
+  if (dica) dica.hidden = true;
+  if (grafico.mira) grafico.mira.setAttribute("visibility", "hidden");
+  $$("#svg-grafico .grafico-ponto--ativo").forEach((c) => c.classList.remove("grafico-ponto--ativo"));
+}
+
+function mostrarDicaGrafico(i) {
+  const p = grafico.pontos[i];
+  const geo = grafico.geo;
+  if (!p || !geo) return;
+  grafico.ativo = i;
+
+  const px = geo.x(i);
+  const py = p.valor === null ? geo.base : geo.y(p.valor);
+  grafico.mira.setAttribute("x1", px);
+  grafico.mira.setAttribute("x2", px);
+  grafico.mira.setAttribute("visibility", "visible");
+  $$("#svg-grafico .grafico-ponto--ativo").forEach((c) => c.classList.remove("grafico-ponto--ativo"));
+  $(`#svg-grafico [data-i="${i}"]`)?.classList.add("grafico-ponto--ativo");
+
+  const dica = $("#grafico-dica");
+  const valor = document.createElement("strong");
+  valor.textContent = p.valor === null ? "Espaço vazio" : `${p.valor} · ${nomeZona(p.valor)}`;
+  const nome = document.createElement("span");
+  nome.className = "grafico-dica__nome";
+  nome.textContent = p.nome ?? "Nenhum louvor escolhido";
+  const meta = document.createElement("span");
+  meta.className = "grafico-dica__meta";
+  meta.textContent = `#${p.ordem} · ${p.secao}`;
+  dica.replaceChildren(valor, nome, meta);
+  dica.hidden = false;
+
+  // Posiciona acima do ponto (ou abaixo, se não couber), sem sair da área
+  const larg = dica.offsetWidth, alt = dica.offsetHeight;
+  const esquerda = Math.max(larg / 2 + 4, Math.min(geo.W - larg / 2 - 4, px));
+  const abaixo = py - alt - 14 < 0;
+  dica.style.left = `${esquerda}px`;
+  dica.style.top = `${abaixo ? py + 14 : py - alt - 14}px`;
+}
+
+function indicePeloPonteiro(e) {
+  const geo = grafico.geo;
+  if (!geo || !grafico.pontos.length) return null;
+  const r = $("#svg-grafico").getBoundingClientRect();
+  const px = e.clientX - r.left;
+  if (px < geo.m.left || px > geo.m.left + geo.plotW) return null;
+  return Math.max(0, Math.min(grafico.pontos.length - 1, Math.floor((px - geo.m.left) / geo.passo)));
+}
+
+const svgGrafico = $("#svg-grafico");
+svgGrafico.addEventListener("pointermove", (e) => {
+  const i = indicePeloPonteiro(e);
+  if (i === null) esconderDicaGrafico();
+  else if (i !== grafico.ativo || $("#grafico-dica").hidden) mostrarDicaGrafico(i);
+});
+svgGrafico.addEventListener("pointerleave", () => {
+  if (document.activeElement !== svgGrafico) { grafico.ativo = null; esconderDicaGrafico(); }
+});
+svgGrafico.addEventListener("focus", () => {
+  if (grafico.pontos.length) mostrarDicaGrafico(grafico.ativo ?? 0);
+});
+svgGrafico.addEventListener("blur", () => { grafico.ativo = null; esconderDicaGrafico(); });
+svgGrafico.addEventListener("keydown", (e) => {
+  const total = grafico.pontos.length;
+  if (!total) return;
+  const atual = grafico.ativo ?? 0;
+  const proximo = { ArrowRight: atual + 1, ArrowLeft: atual - 1, Home: 0, End: total - 1 }[e.key];
+  if (proximo === undefined) return;
+  e.preventDefault();
+  mostrarDicaGrafico(Math.max(0, Math.min(total - 1, proximo)));
+});
+
+// Redesenha quando a largura muda (inclusive quando a aba passa a ficar visível)
+new ResizeObserver(() => {
+  const W = $("#grafico-area").clientWidth;
+  if (W && W !== grafico.larguraDesenhada) renderizarGraficoFluxo();
+}).observe($("#grafico-area"));
+
+// ----- Análise do formato "sorriso" -----
+
+const ICONE_OK = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
+const ICONE_ATENCAO = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9.5"/></svg>`;
+
+// Divide o culto em três partes (pela posição das músicas) e tira a média de cada uma
+function renderAnaliseFluxo(pontos) {
+  const n = pontos.length;
+  const partes = ["Início", "Meio", "Fim"].map((nome, k) => {
+    const valores = pontos
+      .slice(Math.floor((k * n) / 3), Math.floor(((k + 1) * n) / 3))
+      .map((p) => p.valor)
+      .filter((v) => v !== null);
+    return { nome, media: valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : null };
+  });
+
+  $("#grafico-partes").innerHTML = partes.map((p) => `
+    <div class="grafico-parte">
+      <span class="grafico-parte__nome">${p.nome}</span>
+      <strong class="grafico-parte__valor">${p.media === null ? "—" : formatarMedia(p.media)}</strong>
+      <span class="grafico-parte__zona">${p.media === null ? "Sem louvores" : nomeZona(p.media)}</span>
+      <span class="grafico-parte__barra" aria-hidden="true"><span style="width: ${p.media === null ? 0 : (p.media / 10) * 100}%"></span></span>
+    </div>`).join("");
+
+  const selo = $("#grafico-selo");
+  const legenda = $("#grafico-legenda");
+  const [inicio, meio, fim] = partes.map((p) => p.media);
+
+  if ([inicio, meio, fim].some((v) => v === null)) {
+    selo.hidden = true;
+    legenda.textContent = "Escolha louvores para o início, o meio e o fim do culto para avaliar o formato.";
     return;
   }
 
-  // Dimensões da viewBox do SVG: Largura 600, Altura 150
-  const larguraSvg = 600;
-  const alturaSvg = 150;
-  const paddingX = 40;
-  const larguraUtil = larguraSvg - (paddingX * 2);
+  const problemas = [];
+  if (inicio <= LIMITE_ZONAS) problemas.push(`o início está contemplativo (média ${formatarMedia(inicio)})`);
+  if (meio > LIMITE_ZONAS) problemas.push(`o meio está celebrativo (média ${formatarMedia(meio)})`);
+  if (fim <= LIMITE_ZONAS) problemas.push(`o fim está contemplativo (média ${formatarMedia(fim)})`);
 
-  let pontosCoordenadas = [];
-  musicasNoFluxo.forEach((item, index) => {
-    // Calcula a posição X proporcional ao número de músicas
-    const x = total === 1 ? larguraSvg / 2 : paddingX + (index / (total - 1)) * larguraUtil;
-    
-    // Calcula a posição Y (Escala de 1 a 10: 10 fica em cima, 1 fica embaixo)
-    // Invertemos o eixo Y do SVG (0 é em cima, 150 é embaixo)
-    let y = alturaSvg / 2; // Padrão no meio se não tiver valor
-    if (item.valor !== null) {
-      // Mapeia 1 a 10 para a altura do SVG (deixando margens de 15px em cima e embaixo)
-      const minY = 20;
-      const maxY = alturaSvg - 20;
-      y = maxY - ((item.valor - 1) / 9) * (maxY - minY);
-    }
-
-    pontosCoordenadas.push({ x, y, ...item });
-  });
-
-  // Monta o caminho da linha (path d="M x y L x y ...")
-  let pathD = "";
-  let circulosHtml = "";
-
-  pontosCoordenadas.forEach((p, i) => {
-    if (p.valor !== null) {
-      if (!pathD) {
-        pathD = `M ${p.x} ${p.y}`;
-      } else {
-        pathD += ` L ${p.x} ${p.y}`;
-      }
-      circulosHtml += `<circle cx="${p.x}" cy="${p.y}" r="6" class="ponto-grafico" data-nome="${p.nome}" data-valor="${p.valor}"><title>${p.nome} (Fluxo: ${p.valor})</title></circle>`;
-    }
-  });
-
-  let svgContent = "";
-  if (pathD) {
-    // Desenha a linha de tendência conectando os pontos válidos
-    svgContent += `<path d="${pathD}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />`;
+  selo.hidden = false;
+  if (!problemas.length) {
+    selo.className = "grafico-selo grafico-selo--ok";
+    selo.innerHTML = `${ICONE_OK}<span>Formato de sorriso</span>`;
+    legenda.textContent = "O culto começa em celebração, desacelera para a contemplação no meio e termina celebrando.";
+  } else {
+    selo.className = "grafico-selo grafico-selo--atencao";
+    selo.innerHTML = `${ICONE_ATENCAO}<span>Ajuste sugerido</span>`;
+    const lista = problemas.length > 1
+      ? `${problemas.slice(0, -1).join(", ")} e ${problemas[problemas.length - 1]}`
+      : problemas[0];
+    legenda.textContent = `${lista[0].toUpperCase()}${lista.slice(1)}. O ideal é celebração (6 a 10) no início e no fim, e contemplação (1 a 5) no meio.`;
   }
-  svgContent += circulosHtml;
-
-  gElementos.innerHTML = svgContent;
-
-  // Análise simples para dar feedback ao usuário sobre o formato de sorriso
-  const valoresValidos = musicasNoFluxo.filter(m => m.valor !== null).map(m => m.valor);
-  let analiseTexto = "Continue preenchendo o fluxo para avaliar o formato.";
-  
-  if (valoresValidos.length >= 3) {
-    const inicio = valoresValidos[0];
-    const meio = valoresValidos[Math.floor(valoresValidos.length / 2)];
-    const fim = valoresValidos[valoresValidos.length - 1];
-
-    if (inicio >= 6 && meio <= 5 && fim >= 6) {
-      analiseTexto = "✨ **Perfeito!** O formato está em 'sorriso' (Início festivo, momento contemplativo no meio e encerramento festivo).";
-    } else {
-      analiseTexto = "💡 **Dica:** Tente colocar músicas mais contemplativas (1-5) no meio do culto e celebrações (6-10) no início e no fim.";
-    }
-  }
-
-  divLegenda.innerHTML = `<p>${analiseTexto}</p>`;
 }
 
 // ---------- 13. ABA GERENCIAR MÚSICAS ----------

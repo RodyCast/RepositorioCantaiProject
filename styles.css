@@ -141,18 +141,6 @@ h1, h2, h3 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; letter-s
 .panel--active { display: block; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
-.tr-titulo {
-  background-color: var(--color-surface-hover, #f1f5f9);
-}
-.tr-titulo td {
-  font-weight: 700;
-  color: var(--color-primary, #0f172a);
-  text-transform: uppercase;
-  font-size: 0.85rem;
-  letter-spacing: 0.05em;
-  padding: 12px 16px !important;
-  border-top: 2px solid var(--color-border, #e2e8f0);
-}
 
 /* ========================================
    CARDS
@@ -747,4 +735,128 @@ body.logado .so-visitante { display: none !important; }
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+/* ========================================
+   FLUXO DO CULTO — momentos em cartões
+   ======================================== */
+#panel-fluxo .card__header--row { gap: 1rem; flex-wrap: wrap; }
+.fluxo-origem { display: inline-block; margin-top: 0.6rem; }
+.fluxo-acoes { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+/* Aviso de modelo alterado e não salvo */
+.fluxo-aviso {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.75rem; flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.9rem;
+  background: #fbf3e4;
+  border: 1px solid #ecd9b0;
+  border-radius: var(--raio);
+  color: #8a6a2c;
+  font-size: 0.875rem;
+}
+.fluxo-aviso__acoes { display: flex; align-items: center; gap: 0.9rem; }
+
+.fluxo-secoes { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.secao {
+  background: var(--creme-claro);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  padding: 0.9rem 1rem;
+  transition: box-shadow var(--transicao), border-color var(--transicao), opacity var(--transicao);
+}
+.secao__cabecalho { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.secao__titulo { font-size: 1.05rem; color: var(--salvia-profunda); }
+.secao__info { font-size: 0.75rem; color: var(--texto-suave); white-space: nowrap; }
+
+/* Momento sem música (ex.: pregação): só um marcador */
+.secao--marcador {
+  background: transparent;
+  border-style: dashed;
+  padding-block: 0.6rem;
+}
+.secao--marcador .secao__titulo { font-size: 0.95rem; color: var(--texto-suave); }
+
+.secao__musicas { list-style: none; margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.secao__linha { display: flex; align-items: center; gap: 0.6rem; }
+.secao__ordem {
+  min-width: 2.2rem;
+  color: var(--texto-suave);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.secao__linha .input-fluxo-musica { flex: 1; min-width: 0; padding: 0.5rem 0.75rem; border-color: var(--borda); background: var(--branco); }
+.secao__linha .input-fluxo-musica:focus { border-color: var(--salvia-escura); }
+
+/* Modo de edição do modelo */
+.secao--editando {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  background: var(--branco);
+  box-shadow: var(--sombra-sm);
+}
+.secao__alca {
+  display: grid; place-items: center;
+  width: 1.5rem; height: 2rem;
+  color: var(--texto-suave);
+  cursor: grab;
+  touch-action: none;
+}
+.secao__alca:active { cursor: grabbing; }
+.secao__nome { flex: 1 1 180px; min-width: 0; padding: 0.5rem 0.75rem; font-family: 'Fraunces', Georgia, serif; font-size: 1rem; }
+.secao__nome--erro { border-color: #b85a3a !important; box-shadow: 0 0 0 3px rgba(184, 90, 58, 0.15) !important; }
+
+.contador {
+  display: flex; align-items: center;
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  background: var(--creme-claro);
+}
+.contador__btn, .btn-icone {
+  width: 2rem; height: 2rem;
+  display: grid; place-items: center;
+  background: none; border: 0; border-radius: 50%;
+  color: var(--texto-suave);
+  font: inherit; font-size: 1rem;
+  cursor: pointer;
+  transition: var(--transicao);
+}
+.contador__btn:hover:not(:disabled), .btn-icone:hover:not(:disabled) { background: var(--salvia-clara); color: var(--salvia-profunda); }
+.contador__btn:disabled, .btn-icone:disabled { opacity: 0.35; cursor: not-allowed; }
+.contador__valor { min-width: 6.2rem; text-align: center; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.contador__valor--vazio { color: var(--texto-suave); font-style: italic; }
+
+.secao__mover { display: flex; gap: 0.15rem; }
+.btn-icone--perigo:hover:not(:disabled) { background: #fbeee9; color: #b85a3a; }
+
+/* Arrastar e soltar */
+.secao--arrastando { opacity: 0.45; }
+.secao--soltar-antes { box-shadow: 0 -3px 0 var(--salvia-escura); }
+.secao--soltar-depois { box-shadow: 0 3px 0 var(--salvia-escura); }
+
+.secao-nova {
+  padding: 0.8rem;
+  background: none;
+  border: 1.5px dashed var(--salvia);
+  border-radius: var(--raio);
+  color: var(--salvia-profunda);
+  font: inherit; font-weight: 500;
+  cursor: pointer;
+  transition: var(--transicao);
+}
+.secao-nova:hover { background: var(--salvia-clara); border-color: var(--salvia-escura); }
+
+.fluxo-rodape { font-size: 0.8rem; color: var(--texto-suave); text-align: center; }
+
+/* Botões da janela de confirmação */
+.confirmar__acoes { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; margin-top: 0.25rem; }
+.confirmar__acoes .btn { flex: 1 1 140px; }
+
+@media (max-width: 640px) {
+  .secao { padding: 0.8rem; }
+  .secao--editando { gap: 0.5rem; }
+  .secao__nome { flex-basis: calc(100% - 2.5rem); }
+  .contador { margin-left: 2rem; }
+  .secao__mover { margin-left: auto; }
+  .secao__ordem { min-width: 1.8rem; }
 }

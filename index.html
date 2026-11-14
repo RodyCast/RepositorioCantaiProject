@@ -190,25 +190,35 @@
         <div class="card__header card__header--row">
           <div>
             <h2>Montar Fluxo do Culto</h2>
-            <p>Organize a ordem dos louvores para o culto de domingo.</p>
+            <p id="fluxo-subtitulo">Escolha os louvores de cada momento do culto.</p>
+            <span class="etiqueta fluxo-origem" id="fluxo-origem">Modelo padrão</span>
           </div>
-          <button class="btn btn--ghost btn--sm" id="btn-limpar-fluxo">Limpar Fluxo</button>
+          <!-- Modo normal: escolher as músicas -->
+          <div class="fluxo-acoes" id="fluxo-acoes-montar">
+            <button class="btn btn--ghost btn--sm" id="btn-limpar-fluxo" type="button">Limpar músicas</button>
+            <button class="btn btn--ghost btn--sm" id="btn-editar-modelo" type="button">✎ Editar modelo</button>
+          </div>
+          <!-- Modo de edição do modelo -->
+          <div class="fluxo-acoes" id="fluxo-acoes-editar" hidden>
+            <button class="btn btn--ghost btn--sm" id="btn-cancelar-modelo" type="button">Cancelar</button>
+            <button class="btn btn--ghost btn--sm" id="btn-concluir-modelo" type="button">Concluir edição</button>
+            <button class="btn btn--primary btn--sm so-logado" id="btn-salvar-modelo" type="button">Salvar para o grupo</button>
+          </div>
         </div>
-        
+
+        <!-- Aparece quando o modelo da tela é diferente do salvo -->
+        <div class="fluxo-aviso" id="fluxo-aviso" role="status" hidden>
+          <span id="fluxo-aviso-texto">Modelo alterado nesta tela.</span>
+          <div class="fluxo-aviso__acoes">
+            <button class="btn-link" id="btn-restaurar-modelo" type="button">Restaurar modelo padrão</button>
+            <button class="btn btn--primary btn--sm so-logado" id="btn-salvar-modelo-aviso" type="button">Salvar para o grupo</button>
+          </div>
+        </div>
+
         <div class="fluxo-container">
-          <table class="tabela tabela-fluxo">
-            <thead>
-              <tr>
-                <th style="width: 80px;">Ordem</th>
-                <th>Momento / Título Fixo</th>
-                <th>Louvor Escolhido</th>
-                <th style="width: 100px;">Ações</th>
-              </tr>
-            </thead>
-            <tbody id="tbody-fluxo">
-              <!-- Gerado dinamicamente pelo JavaScript -->
-            </tbody>
-          </table>
+          <!-- Momentos do culto (cartões), gerados pelo JavaScript -->
+          <div class="fluxo-secoes" id="fluxo-secoes"></div>
+          <datalist id="lista-louvores-fluxo"></datalist>
           <!-- GRÁFICO DINÂMICO DO FLUXO DO CULTO -->
           <div class="card card-grafico-fluxo" style="margin-top: 20px;">
             <div class="card__header">
@@ -402,6 +412,21 @@
         <button class="btn btn--primary auth__acao" id="btn-salvar-senha" type="submit">Salvar nova senha</button>
       </form>
     </div>
+  </dialog>
+
+  <!-- CONFIRMAÇÃO: salvar o modelo do Fluxo do Culto para o grupo inteiro -->
+  <dialog class="auth" id="confirmar-modelo" aria-labelledby="confirmar-modelo-titulo">
+    <form method="dialog" class="auth__caixa auth__etapa">
+      <div class="auth__icone">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </div>
+      <h2 class="auth__titulo" id="confirmar-modelo-titulo">Salvar modelo para o grupo "<span class="js-nome-grupo"></span>"?</h2>
+      <p class="auth__texto">Essa alteração vai mudar o modelo do Fluxo do Culto para <strong>todos os membros do grupo <span class="js-nome-grupo"></span></strong>.</p>
+      <div class="confirmar__acoes">
+        <button class="btn btn--ghost" value="cancelar">Cancelar</button>
+        <button class="btn btn--primary" value="salvar">Salvar para o grupo</button>
+      </div>
+    </form>
   </dialog>
 
   <div class="toast" id="toast" hidden></div>

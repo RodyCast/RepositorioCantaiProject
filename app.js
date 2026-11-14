@@ -417,7 +417,7 @@ async function recarregarTudo() {
   popularSelectLouvores();
   renderTabela();
   atualizarPreview();
-  inicializarFluxo();
+  await inicializarFluxo();
   popularAbaMusicas();
 
   // quem saiu (ou entrou sem permissão) não pode continuar numa aba restrita
@@ -622,184 +622,536 @@ $("#btn-logout").addEventListener("click", async () => {
 });
 
 // ---------- 12. ABA FLUXO DO CULTO ----------
+// O fluxo tem duas partes:
+// - o MODELO (momentos do culto e quantas músicas cada um tem), salvo no banco
+//   por grupo, na tabela modelos_fluxo;
+// - as MÚSICAS escolhidas, salvas só neste navegador (localStorage).
+// Visitantes usam o modelo do grupo 1: podem editá-lo na tela, mas não salvar.
+// Mudanças de modelo não salvas se perdem ao recarregar a página ou entrar/sair.
 
-// Estrutura padrão do culto no Centro
-// tipo: 'musica' (permite selecionar música e adicionar extras) ou 'titulo' (título fixo do culto)
-const ESTRUTURA_PADRAO_FLUXO = [
-  { tipo: 'musica', grupo: 'inicial' },
-  { tipo: 'titulo', texto: 'Abertura' },
-  { tipo: 'musica', grupo: 'abertura_1' },
-  { tipo: 'musica', grupo: 'abertura_2' },
-  { tipo: 'musica', grupo: 'abertura_3' },
-  { tipo: 'musica', grupo: 'abertura_4' },
-  { tipo: 'titulo', texto: 'Ceia' },
-  { tipo: 'musica', grupo: 'ceia' },
-  { tipo: 'titulo', texto: 'Oferta' },
-  { tipo: 'musica', grupo: 'oferta' },
-  { tipo: 'titulo', texto: 'Visitantes' },
-  { tipo: 'musica', grupo: 'visitantes' },
-  { tipo: 'titulo', texto: 'Leitura/Mensagem' },
-  { tipo: 'musica', grupo: 'mensagem_1' },
-  { tipo: 'musica', grupo: 'mensagem_2' },
-  { tipo: 'musica', grupo: 'mensagem_3' },
-  { tipo: 'musica', grupo: 'mensagem_4' },
-  { tipo: 'musica', grupo: 'mensagem_5' }
+const GRUPO_MODELO_PADRAO = 1;
+const MAX_MUSICAS_POR_SECAO = 10;
+
+// Usado se o banco não responder ou ainda não tiver o modelo do grupo 1
+const MODELO_PADRAO_FLUXO = [
+  { id: "inicio",     titulo: "Início",           qtd_musicas: 1 },
+  { id: "abertura",   titulo: "Abertura",         qtd_musicas: 4 },
+  { id: "ceia",       titulo: "Ceia",             qtd_musicas: 1 },
+  { id: "oferta",     titulo: "Oferta",           qtd_musicas: 1 },
+  { id: "visitantes", titulo: "Visitantes",       qtd_musicas: 1 },
+  { id: "mensagem",   titulo: "Leitura/Mensagem", qtd_musicas: 5 }
 ];
 
-let fluxoCulto = [];
+let modeloBanco = [];         // como o modelo está salvo no banco
+let modeloAtual = [];         // o que está na tela (pode ter mudanças não salvas)
+let rascunhoModelo = null;    // cópia em edição (null = fora do modo de edição)
+let modeloEhDoGrupo = false;  // true se o grupo do usuário já salvou um modelo próprio
+let modeloAtualizadoEm = null;
+let musicasFluxo = {};        // { idDoMomento: [idDaMusica | null, ...] }
 
-function inicializarFluxo() {
-  // Carrega do localStorage se já houver algo salvo, senão usa o padrão
-  const salvo = localStorage.getItem('cantai_fluxo_culto');
-  if (salvo) {
-    try {
-      fluxoCulto = JSON.parse(salvo);
-    } catch (e) {
-      fluxoCulto = JSON.parse(JSON.stringify(ESTRUTURA_PADRAO_FLUXO));
+const copiar = (obj) => JSON.parse(JSON.stringify(obj));
+const mesmoModelo = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const rotuloLouvor = (l) => `${l.nome}${l.acorde ? ` (${l.acorde})` : ""}`;
+const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+
+function escaparHtml(texto) {
+  const mapa = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(texto ?? "").replace(/[&<>"']/g, (c) => mapa[c]);
+}
+
+function novoIdSecao() {
+  return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+// Aceita o valor digitado no formato "Nome (Acorde)" ou só "Nome"
+function encontrarLouvor(valor) {
+  const v = valor.trim().toLowerCase();
+  return louvores.find((l) => rotuloLouvor(l).toLowerCase() === v || l.nome.toLowerCase() === v);
+}
+
+// Confere o JSON vindo do banco, para um registro mal formado não quebrar a tela
+function normalizarSecoes(secoes) {
+  if (!Array.isArray(secoes)) return null;
+  const validas = secoes
+    .filter((s) => s && typeof s.id === "string" && typeof s.titulo === "string")
+    .map((s) => ({
+      id: s.id,
+      titulo: s.titulo,
+      qtd_musicas: Math.max(0, Math.min(MAX_MUSICAS_POR_SECAO, Math.trunc(Number(s.qtd_musicas)) || 0))
+    }));
+  return validas.length ? validas : null;
+}
+
+// ----- 12.1 Carregar e salvar -----
+
+// Busca o modelo do grupo de quem está logado; se não houver, o do grupo 1
+async function carregarModeloFluxo() {
+  modeloEhDoGrupo = false;
+  modeloAtualizadoEm = null;
+  const grupos = grupoId !== null && grupoId !== GRUPO_MODELO_PADRAO
+    ? [grupoId, GRUPO_MODELO_PADRAO]
+    : [GRUPO_MODELO_PADRAO];
+
+  try {
+    const { data, error } = await db
+      .from("modelos_fluxo")
+      .select("grupo_id, secoes, atualizado_em")
+      .in("grupo_id", grupos);
+    if (error) throw error;
+
+    const doGrupo = grupoId !== null ? data.find((m) => m.grupo_id === grupoId) : null;
+    const escolhido = doGrupo ?? data.find((m) => m.grupo_id === GRUPO_MODELO_PADRAO);
+    const secoes = normalizarSecoes(escolhido?.secoes);
+    if (secoes) {
+      modeloEhDoGrupo = !!doGrupo;
+      modeloAtualizadoEm = escolhido.atualizado_em;
+      return secoes;
     }
-  } else {
-    fluxoCulto = JSON.parse(JSON.stringify(ESTRUTURA_PADRAO_FLUXO));
+  } catch (err) {
+    console.error("Erro ao carregar o modelo do fluxo:", err);
+    mostrarToast("Não foi possível carregar o modelo do culto. Usando o padrão.");
   }
+  return copiar(MODELO_PADRAO_FLUXO);
+}
+
+async function salvarModeloNoGrupo(secoes, btn) {
+  if (grupoId === null) return;
+  if (!(await confirmarSalvarModelo())) return;
+
+  carregando(btn, true);
+  try {
+    const agora = new Date().toISOString();
+    const { data, error } = await db
+      .from("modelos_fluxo")
+      .upsert({ grupo_id: grupoId, secoes, atualizado_em: agora }, { onConflict: "grupo_id" })
+      .select("grupo_id");
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error("Nenhuma linha gravada (sem permissão).");
+
+    modeloBanco = copiar(secoes);
+    modeloAtual = copiar(secoes);
+    rascunhoModelo = null;
+    modeloEhDoGrupo = true;
+    modeloAtualizadoEm = agora;
+    renderFluxo();
+    mostrarToast(`Modelo salvo para o grupo ${nomeGrupo}.`);
+  } catch (err) {
+    console.error("Erro ao salvar o modelo do fluxo:", err);
+    mostrarToast("Erro ao salvar o modelo. Tente novamente.");
+  } finally {
+    carregando(btn, false);
+  }
+}
+
+// As músicas escolhidas ficam separadas por grupo (ou "visitante") neste navegador
+const chaveFluxoLocal = () => `cantai_fluxo_culto_${grupoId ?? "visitante"}`;
+
+function carregarMusicasLocal() {
+  musicasFluxo = {};
+  try {
+    const salvo = localStorage.getItem(chaveFluxoLocal());
+    if (salvo) {
+      const obj = JSON.parse(salvo);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) musicasFluxo = obj;
+    } else {
+      migrarFluxoAntigo();
+    }
+  } catch {
+    musicasFluxo = {};
+  }
+}
+
+function salvarMusicasLocal() {
+  try { localStorage.setItem(chaveFluxoLocal(), JSON.stringify(musicasFluxo)); } catch { /* sem armazenamento */ }
+}
+
+// A versão anterior guardava uma lista única (títulos + músicas) em 'cantai_fluxo_culto'.
+// Converte para o formato novo, usando os ids do modelo padrão.
+function migrarFluxoAntigo() {
+  const antigo = localStorage.getItem("cantai_fluxo_culto");
+  if (!antigo) return;
+  localStorage.removeItem("cantai_fluxo_culto");
+  const lista = JSON.parse(antigo);
+  if (!Array.isArray(lista)) return;
+
+  const idPorTitulo = {
+    "Abertura": "abertura", "Ceia": "ceia", "Oferta": "oferta",
+    "Visitantes": "visitantes", "Leitura/Mensagem": "mensagem"
+  };
+  let secaoId = "inicio";
+  lista.forEach((item) => {
+    if (item.tipo === "titulo") { secaoId = idPorTitulo[item.texto] ?? secaoId; return; }
+    (musicasFluxo[secaoId] ??= []).push(item.musicaId ?? null);
+  });
+  salvarMusicasLocal();
+}
+
+// Linhas de música de um momento: no mínimo a quantidade do modelo,
+// mais as extras que a pessoa adicionou com o "+"
+function linhasDaSecao(secao) {
+  if (secao.qtd_musicas === 0) return [];
+  const salvas = musicasFluxo[secao.id] ?? [];
+  return Array.from({ length: Math.max(secao.qtd_musicas, salvas.length) }, (_, i) => salvas[i] ?? null);
+}
+
+async function inicializarFluxo() {
+  rascunhoModelo = null;
+  modeloBanco = await carregarModeloFluxo();
+  modeloAtual = copiar(modeloBanco);
+  carregarMusicasLocal();
   renderFluxo();
 }
 
-function salvarFluxoLocal() {
-  localStorage.setItem('cantai_fluxo_culto', JSON.stringify(fluxoCulto));
-}
+// ----- 12.2 Desenho da tela -----
+
+const secoesEl = $("#fluxo-secoes");
 
 function renderFluxo() {
-  const tbody = $("#tbody-fluxo");
-  let html = "";
-  let contadorMusica = 1;
+  const editando = rascunhoModelo !== null;
+  $("#fluxo-acoes-montar").hidden = editando;
+  $("#fluxo-acoes-editar").hidden = !editando;
+  $("#fluxo-subtitulo").textContent = editando
+    ? "Renomeie, reordene, adicione ou remova momentos e defina quantas músicas cada um tem."
+    : "Escolha os louvores de cada momento do culto.";
+  secoesEl.classList.toggle("fluxo-secoes--editando", editando);
+  atualizarInfoModelo();
 
-  // Cria a lista de opções para o datalist apenas com o nome (e acorde opcional)
-  const datalistOpcoes = [...louvores]
+  $("#lista-louvores-fluxo").innerHTML = [...louvores]
     .sort((a, b) => a.nome.localeCompare(b.nome))
-    .map(l => `<option value="${l.nome}${l.acorde ? ` (${l.acorde})` : ''}"></option>`)
+    .map((l) => `<option value="${escaparHtml(rotuloLouvor(l))}"></option>`)
     .join("");
 
-  let datalistHtml = `<datalist id="lista-louvores-fluxo">${datalistOpcoes}</datalist>`;
-
-  fluxoCulto.forEach((item, index) => {
-    if (item.tipo === 'titulo') {
-      html += `
-        <tr class="tr-titulo">
-          <td colspan="4"><strong>${item.texto}</strong></td>
-        </tr>
-      `;
-    } else {
-      // Busca o nome formatado da música selecionada para exibir no input
-      let textoInput = "";
-      if (item.musicaId) {
-        const m = louvores.find(l => l.id === item.musicaId);
-        if (m) textoInput = `${m.nome}${m.acorde ? ` (${m.acorde})` : ''}`;
-      }
-
-      html += `
-        <tr data-index="${index}">
-          <td class="td-ordem">#${contadorMusica}</td>
-          <td><span class="badge-slot">Espaço para música</span></td>
-          <td>
-            <input type="text" class="input-fluxo-musica" data-index="${index}" list="lista-louvores-fluxo" value="${textoInput}" placeholder="Digite o nome do louvor..." autocomplete="off">
-          </td>
-          <td>
-            <div class="acoes-fluxo">
-              <button type="button" class="btn btn--ghost btn--sm btn-add-mais" data-index="${index}" title="Adicionar música logo abaixo">+</button>
-              ${item.extra ? `<button type="button" class="btn btn--ghost btn--sm btn-remover-extra" data-index="${index}" title="Remover esta linha">×</button>` : ''}
-            </div>
-          </td>
-        </tr>
-      `;
-      contadorMusica++;
-    }
-  });
-
-  tbody.innerHTML = html + datalistHtml;
-
+  secoesEl.innerHTML = editando ? htmlEdicaoModelo() : htmlMontarFluxo();
   renderizarGraficoFluxo();
+}
 
-  // Evento para validar e salvar quando o usuário seleciona ou digita o nome
-  document.querySelectorAll(".input-fluxo-musica").forEach(input => {
-    const idx = input.dataset.index;
+// Etiqueta de origem do modelo e aviso de "modelo alterado"
+function atualizarInfoModelo() {
+  const logado = grupoId !== null;
+  let origem = "Modelo padrão";
+  if (logado) origem = modeloEhDoGrupo ? `Modelo do grupo ${nomeGrupo}` : "Modelo padrão (seu grupo ainda não salvou um)";
+  $("#fluxo-origem").textContent = origem;
 
-    input.addEventListener("input", (e) => {
-      const valorDigitado = e.target.value.trim();
-      
-      if (!valorDigitado) {
-        fluxoCulto[idx].musicaId = null;
-        salvarFluxoLocal();
-        renderizarGraficoFluxo();
-        return;
-      }
+  $("#fluxo-aviso").hidden = rascunhoModelo !== null || mesmoModelo(modeloAtual, modeloBanco);
+  $("#fluxo-aviso-texto").textContent = logado
+    ? "Modelo alterado nesta tela, ainda não salvo para o grupo."
+    : "Modelo alterado nesta tela. Visitantes não podem salvar o modelo.";
+  $("#btn-restaurar-modelo").textContent = logado && modeloEhDoGrupo ? "Restaurar modelo do grupo" : "Restaurar modelo padrão";
+}
 
-      // Tenta encontrar a música correspondente pelo nome exato (ignorando maiúsculas/minúsculas)
-      // O valor do input vem no formato "Nome (Acorde)" ou apenas "Nome"
-      const encontrada = louvores.find(l => {
-        const nomeFormatado = `${l.nome}${l.acorde ? ` (${l.acorde})` : ''}`;
-        return nomeFormatado.toLowerCase() === valorDigitado.toLowerCase() || l.nome.toLowerCase() === valorDigitado.toLowerCase();
-      });
+function htmlMontarFluxo() {
+  let ordem = 1;
+  return modeloAtual.map((secao) => {
+    const linhas = linhasDaSecao(secao);
+    const id = escaparHtml(secao.id);
+    const cabecalho = `
+      <header class="secao__cabecalho">
+        <h3 class="secao__titulo">${escaparHtml(secao.titulo)}</h3>
+        <span class="secao__info">${linhas.length ? plural(linhas.length, "música", "músicas") : "Sem música"}</span>
+      </header>`;
+    if (!linhas.length) return `<article class="secao secao--marcador">${cabecalho}</article>`;
 
-      if (encontrada) {
-        fluxoCulto[idx].musicaId = encontrada.id;
-        salvarFluxoLocal();
-        renderizarGraficoFluxo();
-      } else {
-        // Se ainda está digitando e não achou correspondência exata, limpa temporariamente o ID
-        fluxoCulto[idx].musicaId = null;
-        renderizarGraficoFluxo();
-      }
-    });
+    const podeRemover = linhas.length > secao.qtd_musicas;
+    const itens = linhas.map((musicaId, pos) => {
+      const m = musicaId ? louvores.find((l) => l.id === musicaId) : null;
+      return `
+        <li class="secao__linha">
+          <span class="secao__ordem">#${ordem++}</span>
+          <input type="text" class="input-fluxo-musica" data-secao="${id}" data-pos="${pos}"
+            list="lista-louvores-fluxo" value="${m ? escaparHtml(rotuloLouvor(m)) : ""}"
+            placeholder="Digite o nome do louvor..." autocomplete="off"
+            aria-label="${escaparHtml(secao.titulo)}, música ${pos + 1}">
+          <div class="acoes-fluxo">
+            <button type="button" class="btn btn--ghost btn--sm btn-add-mais" data-secao="${id}" data-pos="${pos}" title="Adicionar música logo abaixo" aria-label="Adicionar música logo abaixo">+</button>
+            ${podeRemover ? `<button type="button" class="btn btn--ghost btn--sm btn-remover-extra" data-secao="${id}" data-pos="${pos}" title="Remover esta linha" aria-label="Remover esta linha">×</button>` : ""}
+          </div>
+        </li>`;
+    }).join("");
+    return `<article class="secao">${cabecalho}<ol class="secao__musicas">${itens}</ol></article>`;
+  }).join("");
+}
 
-    // Ao sair do campo (blur), garante que se o usuário digitou algo inválido que não existe na lista, o campo é limpo
-    input.addEventListener("change", (e) => {
-      const valorDigitado = e.target.value.trim();
-      if (!valorDigitado) {
-        fluxoCulto[idx].musicaId = null;
-        salvarFluxoLocal();
-        renderizarGraficoFluxo();
-        return;
-      }
+const ICONE_ALCA = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="19" r="1.6"/><circle cx="15" cy="19" r="1.6"/></svg>`;
 
-      const encontrada = louvores.find(l => {
-        const nomeFormatado = `${l.nome}${l.acorde ? ` (${l.acorde})` : ''}`;
-        return nomeFormatado.toLowerCase() === valorDigitado.toLowerCase() || l.nome.toLowerCase() === valorDigitado.toLowerCase();
-      });
+function htmlEdicaoModelo() {
+  const total = rascunhoModelo.length;
+  const cards = rascunhoModelo.map((secao, i) => {
+    const qtd = secao.qtd_musicas;
+    return `
+      <article class="secao secao--editando" data-index="${i}">
+        <span class="secao__alca" title="Arraste para reordenar">${ICONE_ALCA}</span>
+        <input type="text" class="secao__nome" data-index="${i}" value="${escaparHtml(secao.titulo)}"
+          placeholder="Nome do momento" maxlength="40" aria-label="Nome do momento ${i + 1}">
+        <div class="contador" role="group" aria-label="Quantidade de músicas">
+          <button type="button" class="contador__btn" data-acao="menos" data-index="${i}" ${qtd === 0 ? "disabled" : ""} aria-label="Uma música a menos">−</button>
+          <span class="contador__valor${qtd === 0 ? " contador__valor--vazio" : ""}">${qtd === 0 ? "Sem música" : plural(qtd, "música", "músicas")}</span>
+          <button type="button" class="contador__btn" data-acao="mais" data-index="${i}" ${qtd >= MAX_MUSICAS_POR_SECAO ? "disabled" : ""} aria-label="Uma música a mais">+</button>
+        </div>
+        <div class="secao__mover">
+          <button type="button" class="btn-icone" data-acao="subir" data-index="${i}" ${i === 0 ? "disabled" : ""} title="Mover para cima" aria-label="Mover para cima">↑</button>
+          <button type="button" class="btn-icone" data-acao="descer" data-index="${i}" ${i === total - 1 ? "disabled" : ""} title="Mover para baixo" aria-label="Mover para baixo">↓</button>
+          <button type="button" class="btn-icone btn-icone--perigo" data-acao="remover" data-index="${i}" ${total === 1 ? "disabled" : ""} title="Remover momento" aria-label="Remover momento">×</button>
+        </div>
+      </article>`;
+  }).join("");
 
-      if (encontrada) {
-        fluxoCulto[idx].musicaId = encontrada.id;
-        input.value = `${encontrada.nome}${encontrada.acorde ? ` (${encontrada.acorde})` : ''}`;
-      } else {
-        fluxoCulto[idx].musicaId = null;
-        input.value = "";
-        mostrarToast("Música não encontrada. Selecione uma da lista.");
-      }
-      salvarFluxoLocal();
-      renderizarGraficoFluxo();
-    });
+  const rodape = grupoId !== null && modeloEhDoGrupo && modeloAtualizadoEm
+    ? `<p class="fluxo-rodape">Modelo do grupo salvo pela última vez em ${new Date(modeloAtualizadoEm).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}.</p>`
+    : "";
+  return cards + `<button type="button" class="secao-nova" data-acao="adicionar">+ Adicionar momento</button>` + rodape;
+}
+
+// ----- 12.3 Montar o culto (escolher músicas) -----
+
+function definirMusica(input, musicaId) {
+  const secao = modeloAtual.find((s) => s.id === input.dataset.secao);
+  if (!secao) return;
+  const linhas = linhasDaSecao(secao);
+  linhas[Number(input.dataset.pos)] = musicaId;
+  musicasFluxo[secao.id] = linhas;
+  salvarMusicasLocal();
+  renderizarGraficoFluxo();
+}
+
+secoesEl.addEventListener("input", (e) => {
+  if (e.target.matches(".secao__nome")) {
+    rascunhoModelo[Number(e.target.dataset.index)].titulo = e.target.value;
+    e.target.classList.remove("secao__nome--erro");
+    return;
+  }
+  if (!e.target.matches(".input-fluxo-musica")) return;
+  const valor = e.target.value.trim();
+  if (!valor) { definirMusica(e.target, null); return; }
+  const encontrada = encontrarLouvor(valor);
+  if (encontrada) definirMusica(e.target, encontrada.id);
+});
+
+// Ao sair do campo: se o texto não for uma música da lista, o campo é limpo
+secoesEl.addEventListener("change", (e) => {
+  if (!e.target.matches(".input-fluxo-musica")) return;
+  const valor = e.target.value.trim();
+  if (!valor) { definirMusica(e.target, null); return; }
+  const encontrada = encontrarLouvor(valor);
+  if (encontrada) {
+    e.target.value = rotuloLouvor(encontrada);
+    definirMusica(e.target, encontrada.id);
+  } else {
+    e.target.value = "";
+    definirMusica(e.target, null);
+    mostrarToast("Música não encontrada. Selecione uma da lista.");
+  }
+});
+
+secoesEl.addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  if (rascunhoModelo) { tratarCliqueEdicao(btn); return; }
+
+  const secao = modeloAtual.find((s) => s.id === btn.dataset.secao);
+  if (!secao) return;
+  const pos = Number(btn.dataset.pos);
+  const linhas = linhasDaSecao(secao);
+
+  if (btn.matches(".btn-add-mais")) {
+    linhas.splice(pos + 1, 0, null);
+  } else if (btn.matches(".btn-remover-extra")) {
+    linhas.splice(pos, 1);
+  } else {
+    return;
+  }
+  musicasFluxo[secao.id] = linhas;
+  salvarMusicasLocal();
+  renderFluxo();
+  if (btn.matches(".btn-add-mais")) {
+    secoesEl.querySelector(`.input-fluxo-musica[data-secao="${CSS.escape(secao.id)}"][data-pos="${pos + 1}"]`)?.focus();
+  }
+});
+
+$("#btn-limpar-fluxo").addEventListener("click", () => {
+  if (!confirm("Deseja limpar todas as músicas escolhidas? O modelo do culto não muda.")) return;
+  musicasFluxo = {};
+  salvarMusicasLocal();
+  renderFluxo();
+  mostrarToast("Músicas do fluxo removidas.");
+});
+
+// ----- 12.4 Editar o modelo -----
+
+function tratarCliqueEdicao(btn) {
+  const acao = btn.dataset.acao;
+  const i = Number(btn.dataset.index);
+  let focar = null; // depois de redesenhar, devolve o foco ao botão equivalente
+
+  switch (acao) {
+    case "menos":
+      rascunhoModelo[i].qtd_musicas = Math.max(0, rascunhoModelo[i].qtd_musicas - 1);
+      focar = `[data-acao="menos"][data-index="${i}"]`;
+      break;
+    case "mais":
+      rascunhoModelo[i].qtd_musicas = Math.min(MAX_MUSICAS_POR_SECAO, rascunhoModelo[i].qtd_musicas + 1);
+      focar = `[data-acao="mais"][data-index="${i}"]`;
+      break;
+    case "subir":
+    case "descer": {
+      const destino = acao === "subir" ? i - 1 : i + 1;
+      moverSecao(i, destino);
+      focar = `[data-acao="${acao}"][data-index="${destino}"]`;
+      break;
+    }
+    case "remover":
+      rascunhoModelo.splice(i, 1);
+      focar = `[data-acao="remover"][data-index="${Math.min(i, rascunhoModelo.length - 1)}"]`;
+      break;
+    case "adicionar":
+      rascunhoModelo.push({ id: novoIdSecao(), titulo: "", qtd_musicas: 1 });
+      focar = `.secao__nome[data-index="${rascunhoModelo.length - 1}"]`;
+      break;
+    default:
+      return;
+  }
+  renderFluxo();
+  const alvo = focar && secoesEl.querySelector(focar);
+  if (alvo && !alvo.disabled) alvo.focus();
+  else if (acao === "menos" || acao === "mais") secoesEl.querySelector(`.secao__nome[data-index="${i}"]`)?.focus();
+}
+
+function moverSecao(de, para) {
+  if (para < 0 || para >= rascunhoModelo.length || de === para) return;
+  const [secao] = rascunhoModelo.splice(de, 1);
+  rascunhoModelo.splice(para, 0, secao);
+}
+
+// Confere os nomes e devolve o modelo pronto, ou null se faltar algum nome
+function validarRascunho() {
+  const secoes = rascunhoModelo.map((s) => ({ ...s, titulo: s.titulo.trim() }));
+  const vazio = secoes.findIndex((s) => !s.titulo);
+  if (vazio !== -1) {
+    const campo = secoesEl.querySelector(`.secao__nome[data-index="${vazio}"]`);
+    campo?.classList.add("secao__nome--erro");
+    campo?.focus();
+    mostrarToast("Dê um nome para todos os momentos.");
+    return null;
+  }
+  return secoes;
+}
+
+$("#btn-editar-modelo").addEventListener("click", () => {
+  rascunhoModelo = copiar(modeloAtual);
+  renderFluxo();
+});
+
+$("#btn-cancelar-modelo").addEventListener("click", () => {
+  rascunhoModelo = null;
+  renderFluxo();
+});
+
+$("#btn-concluir-modelo").addEventListener("click", () => {
+  const secoes = validarRascunho();
+  if (!secoes) return;
+  modeloAtual = secoes;
+  rascunhoModelo = null;
+  renderFluxo();
+});
+
+$("#btn-salvar-modelo").addEventListener("click", (e) => {
+  const secoes = validarRascunho();
+  if (secoes) salvarModeloNoGrupo(secoes, e.currentTarget);
+});
+
+$("#btn-salvar-modelo-aviso").addEventListener("click", (e) => {
+  salvarModeloNoGrupo(copiar(modeloAtual), e.currentTarget);
+});
+
+$("#btn-restaurar-modelo").addEventListener("click", () => {
+  modeloAtual = copiar(modeloBanco);
+  renderFluxo();
+  mostrarToast("Modelo restaurado.");
+});
+
+// Arrastar para reordenar (computador). No celular, usam-se as setas ↑ ↓.
+// O card só fica arrastável enquanto a alça está pressionada, para não
+// atrapalhar a seleção de texto no campo do nome.
+let arrastandoIndex = null;
+
+const limparMarcasArraste = () => secoesEl.querySelectorAll(".secao--editando").forEach((c) => {
+  c.classList.remove("secao--arrastando", "secao--soltar-antes", "secao--soltar-depois");
+});
+
+secoesEl.addEventListener("pointerdown", (e) => {
+  const alca = e.target.closest(".secao__alca");
+  if (alca && rascunhoModelo) alca.closest(".secao").draggable = true;
+});
+secoesEl.addEventListener("pointerup", () => {
+  if (arrastandoIndex === null) secoesEl.querySelectorAll(".secao[draggable]").forEach((c) => c.removeAttribute("draggable"));
+});
+
+secoesEl.addEventListener("dragstart", (e) => {
+  const card = e.target.closest?.(".secao--editando");
+  if (!card || !card.draggable) return;
+  arrastandoIndex = Number(card.dataset.index);
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", ""); // necessário no Firefox
+  card.classList.add("secao--arrastando");
+});
+
+secoesEl.addEventListener("dragover", (e) => {
+  if (arrastandoIndex === null) return;
+  const card = e.target.closest(".secao--editando");
+  if (!card) return;
+  e.preventDefault();
+  const r = card.getBoundingClientRect();
+  const depois = e.clientY > r.top + r.height / 2;
+  secoesEl.querySelectorAll(".secao--soltar-antes, .secao--soltar-depois").forEach((c) => {
+    if (c !== card) c.classList.remove("secao--soltar-antes", "secao--soltar-depois");
   });
+  card.classList.toggle("secao--soltar-depois", depois);
+  card.classList.toggle("secao--soltar-antes", !depois);
+});
 
-  // Evento para adicionar música extra logo abaixo
-  document.querySelectorAll(".btn-add-mais").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      const idx = Number(e.target.dataset.index);
-      fluxoCulto.splice(idx + 1, 0, { tipo: 'musica', musicaId: null, extra: true });
-      salvarFluxoLocal();
-      renderFluxo();
-      renderizarGraficoFluxo();
-    });
-  });
+secoesEl.addEventListener("drop", (e) => {
+  if (arrastandoIndex === null) return;
+  const card = e.target.closest(".secao--editando");
+  if (!card) return;
+  e.preventDefault();
+  let destino = Number(card.dataset.index) + (card.classList.contains("secao--soltar-depois") ? 1 : 0);
+  if (destino > arrastandoIndex) destino--;
+  moverSecao(arrastandoIndex, destino);
+  arrastandoIndex = null;
+  renderFluxo();
+});
 
-  // Evento para remover música extra criada
-  document.querySelectorAll(".btn-remover-extra").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      const idx = Number(e.target.dataset.index);
-      fluxoCulto.splice(idx, 1);
-      salvarFluxoLocal();
-      renderFluxo();
-      renderizarGraficoFluxo();
-    });
+secoesEl.addEventListener("dragend", () => {
+  arrastandoIndex = null;
+  limparMarcasArraste();
+  secoesEl.querySelectorAll(".secao[draggable]").forEach((c) => c.removeAttribute("draggable"));
+});
+
+// Confirmação antes de salvar o modelo para o grupo inteiro
+const confirmarModeloDialog = $("#confirmar-modelo");
+
+function confirmarSalvarModelo() {
+  confirmarModeloDialog.querySelectorAll(".js-nome-grupo").forEach((el) => { el.textContent = nomeGrupo || "seu grupo"; });
+  confirmarModeloDialog.returnValue = "";
+  confirmarModeloDialog.showModal();
+  return new Promise((resolve) => {
+    confirmarModeloDialog.addEventListener("close", () => resolve(confirmarModeloDialog.returnValue === "salvar"), { once: true });
   });
 }
+
+confirmarModeloDialog.addEventListener("click", (e) => {
+  if (e.target === confirmarModeloDialog) confirmarModeloDialog.close();
+});
+
+// Avisa antes de sair da página com mudanças de modelo não salvas
+window.addEventListener("beforeunload", (e) => {
+  const naTela = rascunhoModelo ?? modeloAtual;
+  if (!mesmoModelo(naTela, modeloBanco)) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+
+// ----- 12.5 Gráfico da curva do culto -----
 
 // Função auxiliar para extrair o número do fluxo (ex: "Contemplação 05" vira 5)
 function extrairNumeroFluxo(fluxoTexto) {
@@ -813,16 +1165,16 @@ function renderizarGraficoFluxo() {
   const divLegenda = $("#grafico-legenda");
   if (!gElementos) return;
 
-  // Filtra apenas os itens que são músicas e que têm uma música selecionada
-  const musicasNoFluxo = fluxoCulto
-    .filter(item => item.tipo === 'musica')
-    .map(item => {
-      if (!item.musicaId) return { valor: null, nome: "Espaço vazio" };
-      const m = louvores.find(l => l.id === item.musicaId);
+  // Todas as linhas de música do culto, na ordem dos momentos
+  const musicasNoFluxo = modeloAtual
+    .flatMap(linhasDaSecao)
+    .map((musicaId) => {
+      if (!musicaId) return { valor: null, nome: "Espaço vazio" };
+      const m = louvores.find(l => l.id === musicaId);
       const valorFluxo = m ? extrairNumeroFluxo(m.fluxo_culto) : null;
       return {
         valor: valorFluxo,
-        nome: m ? m.nome : "Desconhecida"
+        nome: m ? escaparHtml(m.nome) : "Desconhecida"
       };
     });
 
@@ -899,17 +1251,6 @@ function renderizarGraficoFluxo() {
 
   divLegenda.innerHTML = `<p>${analiseTexto}</p>`;
 }
-
-// Botão limpar fluxo completo (volta ao padrão)
-$("#btn-limpar-fluxo").addEventListener("click", () => {
-  if (confirm("Deseja realmente redefinir o fluxo do culto para o padrão?")) {
-    fluxoCulto = JSON.parse(JSON.stringify(ESTRUTURA_PADRAO_FLUXO));
-    salvarFluxoLocal();
-    renderFluxo();
-    renderizarGraficoFluxo();
-    mostrarToast("Fluxo redefinido para o padrão.");
-  }
-});
 
 // ---------- 13. ABA GERENCIAR MÚSICAS ----------
 let musicaEditando = null; // null = cadastrando uma música nova
